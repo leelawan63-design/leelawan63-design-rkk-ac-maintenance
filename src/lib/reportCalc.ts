@@ -10,6 +10,24 @@ export function formatReportTechnicianName(
   return technicianName.trim();
 }
 
+export function formatReportTechnicianFirstName(
+  technicianId?: string,
+  technicianName?: string
+): string {
+  const base = formatReportTechnicianName(technicianId, technicianName);
+  if (!base) return '';
+  let cleaned = base.replace(/\([^)]*\)/g, ' ');
+  cleaned = cleaned.replace(/(?:โทร\.?|tel\.?|เบอร์)?[\s:/-]*0\d[\d\s-]{6,}/gi, ' ').trim();
+  if (!cleaned) return '';
+  const parts = cleaned.split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return '';
+  const standalonePrefixes = new Set(['นาย', 'นาง', 'นางสาว', 'น.ส.', 'คุณ', 'ช่าง']);
+  if (standalonePrefixes.has(parts[0]) && parts.length > 1) {
+    return parts[1];
+  }
+  return parts[0];
+}
+
 export function formatReportNotes(notes?: string): string {
   if (!notes) return '';
   return notes

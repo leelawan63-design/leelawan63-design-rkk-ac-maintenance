@@ -10,6 +10,7 @@ import {
   computeUncleanedSummary,
   formatReportBuildingName,
   formatReportNotes,
+  formatReportTechnicianFirstName,
   formatReportTechnicianName,
   groupUncleanedItemsByBuildingFloor,
 } from '../lib/reportCalc';
@@ -101,6 +102,7 @@ export const ReportsPrintView: React.FC<ReportsPrintViewProps> = ({
   const [showMonthlySection2, setShowMonthlySection2] = useState(true);
   const [showMonthlySection3, setShowMonthlySection3] = useState(true);
   const [showMonthlyTechSummary, setShowMonthlyTechSummary] = useState(true);
+  const [showDailyTechnicianCol, setShowDailyTechnicianCol] = useState(true);
 
   const [printFallbackUrl, setPrintFallbackUrl] = useState<string | null>(null);
   const printContainerRef = useRef<HTMLDivElement | null>(null);
@@ -134,6 +136,7 @@ export const ReportsPrintView: React.FC<ReportsPrintViewProps> = ({
     showMonthlySection2,
     showMonthlySection3,
     showMonthlyTechSummary,
+    showDailyTechnicianCol,
     senderName,
     inspectorName,
   ]);
@@ -884,6 +887,20 @@ export const ReportsPrintView: React.FC<ReportsPrintViewProps> = ({
             />
           </div>
         </div>
+
+        {activeReport === 'daily_signoff' && (
+          <div className="pt-3 border-t border-[#E8EEF4] flex flex-wrap items-center justify-between gap-2">
+            <label className="inline-flex items-center gap-2 text-xs text-[#334155] cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={showDailyTechnicianCol}
+                onChange={(e) => setShowDailyTechnicianCol(e.target.checked)}
+                className="w-4 h-4 rounded border-[#CBD5E1] text-[#4A7C9B] focus:ring-[#4A7C9B]"
+              />
+              <span>แสดงคอลัมน์ &quot;ช่างผู้ล้าง&quot; (แสดงเฉพาะชื่อจริง ไม่แสดงนามสกุลและเบอร์โทร)</span>
+            </label>
+          </div>
+        )}
 
         {activeReport === 'monthly' && (
           <div className="pt-3 border-t border-[#E8EEF4] space-y-2.5">
@@ -1644,26 +1661,64 @@ export const ReportsPrintView: React.FC<ReportsPrintViewProps> = ({
               <thead>
                 <tr className="bg-[#EEF4F9] text-[#1E293B]">
                   <th className="border border-[#CBD5E1] py-1 px-1 text-center w-[5%]">ลำดับ</th>
-                  <th className="border border-[#CBD5E1] py-1 px-1 text-left w-[15%]">อาคาร</th>
+                  <th
+                    className={`border border-[#CBD5E1] py-1 px-1 text-left ${
+                      showDailyTechnicianCol ? 'w-[15%]' : 'w-[17%]'
+                    }`}
+                  >
+                    อาคาร
+                  </th>
                   <th className="border border-[#CBD5E1] py-1 px-1 text-center w-[6%]">ชั้น</th>
-                  <th className="border border-[#CBD5E1] py-1 px-1 text-left w-[16%]">ห้อง</th>
-                  <th className="border border-[#CBD5E1] py-1 px-1 text-left w-[11%]">หมายเลขเครื่อง</th>
+                  <th
+                    className={`border border-[#CBD5E1] py-1 px-1 text-left ${
+                      showDailyTechnicianCol ? 'w-[16%]' : 'w-[20%]'
+                    }`}
+                  >
+                    ห้อง
+                  </th>
+                  <th
+                    className={`border border-[#CBD5E1] py-1 px-1 text-left ${
+                      showDailyTechnicianCol ? 'w-[11%]' : 'w-[12%]'
+                    }`}
+                  >
+                    หมายเลขเครื่อง
+                  </th>
                   <th className="border border-[#CBD5E1] py-1 px-1 text-left w-[9%]">ประเภท</th>
-                  <th className="border border-[#CBD5E1] py-1 px-1 text-left w-[14%]">สถานะ</th>
-                  <th className="border border-[#CBD5E1] py-1 px-1 text-left w-[12%]">ช่างผู้ล้าง</th>
-                  <th className="border border-[#CBD5E1] py-1 px-1 text-left w-[12%]">หมายเหตุ</th>
+                  <th
+                    className={`border border-[#CBD5E1] py-1 px-1 text-left ${
+                      showDailyTechnicianCol ? 'w-[14%]' : 'w-[15%]'
+                    }`}
+                  >
+                    สถานะ
+                  </th>
+                  {showDailyTechnicianCol && (
+                    <th className="border border-[#CBD5E1] py-1 px-1 text-left w-[12%]">ช่างผู้ล้าง</th>
+                  )}
+                  <th
+                    className={`border border-[#CBD5E1] py-1 px-1 text-left ${
+                      showDailyTechnicianCol ? 'w-[12%]' : 'w-[16%]'
+                    }`}
+                  >
+                    หมายเหตุ
+                  </th>
                 </tr>
               </thead>
               <tbody>
                 {dailyLogs.length === 0 ? (
                   <tr>
-                    <td colSpan={9} className="border border-[#CBD5E1] py-8 text-center text-[#64748B]">
+                    <td
+                      colSpan={showDailyTechnicianCol ? 9 : 8}
+                      className="border border-[#CBD5E1] py-8 text-center text-[#64748B]"
+                    >
                       ยังไม่มีบันทึกการเข้าล้างในวันที่ {formatThaiDate(dailyDate)}
                     </td>
                   </tr>
                 ) : (
                   dailyLogs.map((l, idx) => {
-                    const techName = formatReportTechnicianName(l.technicianId, l.technicianName);
+                    const techFirstName = formatReportTechnicianFirstName(
+                      l.technicianId,
+                      l.technicianName
+                    );
                     const cleanNote = formatReportNotes(l.notes);
                     return (
                       <tr key={l.id}>
@@ -1684,7 +1739,11 @@ export const ReportsPrintView: React.FC<ReportsPrintViewProps> = ({
                         <td className="border border-[#CBD5E1] py-[2.5px] px-1 break-words">
                           {CLEANING_STATUS_LABELS[l.status]}
                         </td>
-                        <td className="border border-[#CBD5E1] py-[2.5px] px-1 break-words">{techName}</td>
+                        {showDailyTechnicianCol && (
+                          <td className="border border-[#CBD5E1] py-[2.5px] px-1 break-words">
+                            {techFirstName}
+                          </td>
+                        )}
                         <td className="border border-[#CBD5E1] py-[2.5px] px-1 break-words">{cleanNote || '-'}</td>
                       </tr>
                     );
