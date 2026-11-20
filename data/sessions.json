@@ -1,0 +1,14 @@
+[
+  {
+    "token": "042c6fea80086f3c0bec0831ab62081fde2d1b3c01f234a3d492720756b07cc7",
+    "userId": "usr-admin",
+    "createdAt": "2026-11-19T07:11:19.672Z",
+    "expiresAt": "2026-11-26T07:11:19.672Z"
+  },
+  {
+    "token": "f5244c583517042ee95599229d2d6b37b5de1d55194b0f14048bf43323f1e52d",
+    "userId": "usr-admin",
+    "createdAt": "2026-11-19T08:07:11.367Z",
+    "expiresAt": "2026-11-26T08:07:11.367Z"
+  }
+]
