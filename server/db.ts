@@ -115,6 +115,7 @@ function createSeedDatabase(): AppDatabase {
       defaultInspectorLabel: 'ผู้ตรวจรับงาน (เจ้าหน้าที่ผู้ว่าจ้าง)',
       googleSheetId: '',
       googleSheetName: 'รายงานล้างเครื่องปรับอากาศ - บจก. รุ่งเรืองกิจการช่าง',
+      appsScriptUrl: '',
       autoSyncSheets: false,
       lastSyncedAt: '',
     },

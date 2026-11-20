@@ -420,6 +420,9 @@ async function startServer(): Promise<void> {
       ...(typeof body.googleSheetName === 'string'
         ? { googleSheetName: body.googleSheetName.trim() }
         : {}),
+      ...(typeof body.appsScriptUrl === 'string'
+        ? { appsScriptUrl: body.appsScriptUrl.trim() }
+        : {}),
       ...(typeof body.autoSyncSheets === 'boolean' ? { autoSyncSheets: body.autoSyncSheets } : {}),
       ...(typeof body.lastSyncedAt === 'string' ? { lastSyncedAt: body.lastSyncedAt } : {}),
     };

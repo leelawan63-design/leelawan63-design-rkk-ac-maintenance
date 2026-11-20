@@ -18,6 +18,9 @@ import {
 import {
   createNewGoogleSpreadsheet,
   syncToGoogleSpreadsheet,
+  syncViaAppsScript,
+  type SheetsSyncSummary,
+  type SyncScope,
 } from './lib/googleSheetsSync';
 import { getTodayIso } from './lib/thaiDate';
 import { LoginPage } from './components/LoginPage';
@@ -156,28 +159,49 @@ export default function App() {
   };
 
   const triggerAutoSyncIfEnabled = useCallback(
-    async (nextUnits: ACUnit[], nextLogs: CleaningLog[], currentCompany: CompanySettings | null) => {
-      if (!currentCompany?.autoSyncSheets || !currentCompany.googleSheetId) return;
+    async (
+      nextUnits: ACUnit[],
+      nextLogs: CleaningLog[],
+      currentCompany: CompanySettings | null,
+      changedScope: SyncScope = 'all'
+    ) => {
+      if (!currentCompany?.autoSyncSheets) return;
+      const appsScriptUrl = currentCompany.appsScriptUrl?.trim() || '';
       const token = getGoogleAccessToken();
-      if (!token) return;
+      const canUseOAuth = Boolean(token && currentCompany.googleSheetId);
+      if (!appsScriptUrl && !canUseOAuth) return;
 
       const today = getTodayIso();
       const year = Number(today.slice(0, 4));
       const month = Number(today.slice(5, 7));
 
       try {
-        await syncToGoogleSpreadsheet(token, currentCompany.googleSheetId, {
-          company: currentCompany,
-          units: nextUnits,
-          logs: nextLogs,
-          year,
-          month,
-        });
+        const summary = appsScriptUrl
+          ? await syncViaAppsScript(appsScriptUrl, {
+              company: currentCompany,
+              units: nextUnits,
+              logs: nextLogs,
+              year,
+              month,
+              changedScope,
+            })
+          : await syncToGoogleSpreadsheet(token!, currentCompany.googleSheetId, {
+              company: currentCompany,
+              units: nextUnits,
+              logs: nextLogs,
+              year,
+              month,
+              changedScope,
+            });
         const nowIso = new Date().toISOString();
         const updated = await api.updateCompany({ lastSyncedAt: nowIso });
         setCompany(updated.company);
-        setSyncNotice('ซิงค์ข้อมูลล่าสุดไปยัง Google Sheets อัตโนมัติแล้ว');
-        setTimeout(() => setSyncNotice(null), 4000);
+        const detail =
+          summary.updatedRows > 0 || summary.appendedRows > 0
+            ? ` (แก้ไข ${summary.updatedRows} แถว, เพิ่มใหม่ ${summary.appendedRows} แถว)`
+            : '';
+        setSyncNotice(`ซิงค์ส่วนที่เปลี่ยนแปลงไปยัง Google Sheets อัตโนมัติแล้ว${detail}`);
+        setTimeout(() => setSyncNotice(null), 4500);
       } catch (err) {
         setSyncNotice(
           `ไม่สามารถซิงค์ Google Sheets อัตโนมัติได้: ${
@@ -198,7 +222,8 @@ export default function App() {
     const logsRes = await api.getLogs();
     setUnits(res.units);
     setLogs(logsRes.logs);
-    await triggerAutoSyncIfEnabled(res.units, logsRes.logs, company);
+    const scope: SyncScope = res.createdUnits.length > 0 ? 'all' : 'logs';
+    await triggerAutoSyncIfEnabled(res.units, logsRes.logs, company, scope);
   };
 
   const handleUpdateLog = async (
@@ -213,32 +238,32 @@ export default function App() {
     await api.updateLog(id, payload);
     const logsRes = await api.getLogs();
     setLogs(logsRes.logs);
-    await triggerAutoSyncIfEnabled(units, logsRes.logs, company);
+    await triggerAutoSyncIfEnabled(units, logsRes.logs, company, 'logs');
   };
 
   const handleDeleteLog = async (id: string) => {
     await api.deleteLog(id);
     const nextLogs = logs.filter((l) => l.id !== id);
     setLogs(nextLogs);
-    await triggerAutoSyncIfEnabled(units, nextLogs, company);
+    await triggerAutoSyncIfEnabled(units, nextLogs, company, 'logs');
   };
 
   const handleCreateUnit = async (payload: Partial<ACUnit>) => {
     const res = await api.createUnit(payload);
     setUnits(res.units);
-    await triggerAutoSyncIfEnabled(res.units, logs, company);
+    await triggerAutoSyncIfEnabled(res.units, logs, company, 'units');
   };
 
   const handleUpdateUnit = async (id: string, payload: Partial<ACUnit>) => {
     const res = await api.updateUnit(id, payload);
     setUnits(res.units);
-    await triggerAutoSyncIfEnabled(res.units, logs, company);
+    await triggerAutoSyncIfEnabled(res.units, logs, company, 'units');
   };
 
   const handleDeleteUnit = async (id: string) => {
     const res = await api.deleteUnit(id);
     setUnits(res.units);
-    await triggerAutoSyncIfEnabled(res.units, logs, company);
+    await triggerAutoSyncIfEnabled(res.units, logs, company, 'units');
   };
 
   const handleImportUnits = async (
@@ -247,7 +272,7 @@ export default function App() {
   ) => {
     const res = await api.importUnits(rows, replaceAll);
     setUnits(res.units);
-    await triggerAutoSyncIfEnabled(res.units, logs, company);
+    await triggerAutoSyncIfEnabled(res.units, logs, company, 'units');
     return { addedCount: res.addedCount, updatedCount: res.updatedCount };
   };
 
@@ -294,22 +319,47 @@ export default function App() {
     setCompany(res.company);
   };
 
-  const handleSyncSpreadsheet = async (year: number, month: number) => {
+  const handleSyncSpreadsheet = async (
+    year: number,
+    month: number
+  ): Promise<SheetsSyncSummary> => {
+    if (!company) throw new Error('ไม่พบข้อมูลบริษัท');
+    const appsScriptUrl = company.appsScriptUrl?.trim() || '';
     const token = getGoogleAccessToken();
-    if (!token || !company?.googleSheetId) {
-      throw new Error('กรุณาเชื่อมต่อ Google และระบุ Spreadsheet ID ก่อน');
+
+    let summary: SheetsSyncSummary;
+    if (appsScriptUrl) {
+      summary = await syncViaAppsScript(appsScriptUrl, {
+        company,
+        units,
+        logs,
+        year,
+        month,
+        changedScope: 'all',
+      });
+    } else {
+      if (!token || !company.googleSheetId) {
+        throw new Error('กรุณาเชื่อมต่อ Google หรือตั้งค่า Apps Script Web App URL ก่อนซิงค์');
+      }
+      summary = await syncToGoogleSpreadsheet(token, company.googleSheetId, {
+        company,
+        units,
+        logs,
+        year,
+        month,
+        changedScope: 'all',
+      });
     }
-    await syncToGoogleSpreadsheet(token, company.googleSheetId, {
-      company,
-      units,
-      logs,
-      year,
-      month,
-    });
+
     const res = await api.updateCompany({
       lastSyncedAt: new Date().toISOString(),
     });
     setCompany(res.company);
+    return summary;
+  };
+
+  const handleSyncDashboard = async (year: number, month: number): Promise<void> => {
+    await handleSyncSpreadsheet(year, month);
   };
 
   if (booting) {
@@ -385,7 +435,7 @@ export default function App() {
               units={units}
               logs={logs}
               googleToken={googleToken}
-              onSyncSheetsNow={handleSyncSpreadsheet}
+              onSyncSheetsNow={handleSyncDashboard}
               onNavigate={setActiveTab}
             />
           )}

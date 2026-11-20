@@ -39,6 +39,7 @@ interface DbCompanyRow {
   default_inspector_label: string;
   google_sheet_id: string;
   google_sheet_name: string;
+  apps_script_url?: string;
   auto_sync_sheets: number;
   last_synced_at: string;
 }
@@ -213,6 +214,7 @@ function mapCompany(row: DbCompanyRow): CompanySettings {
     defaultInspectorLabel: row.default_inspector_label || '',
     googleSheetId: row.google_sheet_id || '',
     googleSheetName: row.google_sheet_name || '',
+    appsScriptUrl: row.apps_script_url || '',
     autoSyncSheets: row.auto_sync_sheets === 1,
     lastSyncedAt: row.last_synced_at || '',
   };
@@ -293,12 +295,28 @@ async function getCompany(db: D1Database): Promise<CompanySettings> {
     defaultInspectorLabel: 'ผู้ตรวจรับงาน (เจ้าหน้าที่ผู้ว่าจ้าง)',
     googleSheetId: '',
     googleSheetName: 'รายงานล้างเครื่องปรับอากาศ - บจก. รุ่งเรืองกิจการช่าง',
+    appsScriptUrl: '',
     autoSyncSheets: false,
     lastSyncedAt: '',
   };
 }
 
+let companySchemaEnsured = false;
+
 async function ensureBootstrapIfEmpty(db: D1Database): Promise<void> {
+  if (!companySchemaEnsured) {
+    try {
+      const cols = await db.prepare('PRAGMA table_info(company_settings)').all<{ name: string }>();
+      if (cols.results.length > 0 && !cols.results.some((c) => c.name === 'apps_script_url')) {
+        await db
+          .prepare("ALTER TABLE company_settings ADD COLUMN apps_script_url TEXT NOT NULL DEFAULT ''")
+          .run();
+      }
+      companySchemaEnsured = true;
+    } catch {
+      // ignore and retry next request if transient
+    }
+  }
   const existingUser = await db.prepare('SELECT id FROM users LIMIT 1').first<{ id: string }>();
   if (!existingUser) {
     const nowIso = new Date().toISOString();
@@ -757,13 +775,16 @@ export const onRequest: PagesFunction = async (context) => {
       ...(typeof body.googleSheetName === 'string'
         ? { googleSheetName: body.googleSheetName.trim() }
         : {}),
+      ...(typeof body.appsScriptUrl === 'string'
+        ? { appsScriptUrl: body.appsScriptUrl.trim() }
+        : {}),
       ...(typeof body.autoSyncSheets === 'boolean' ? { autoSyncSheets: body.autoSyncSheets } : {}),
       ...(typeof body.lastSyncedAt === 'string' ? { lastSyncedAt: body.lastSyncedAt } : {}),
     };
 
     await db
       .prepare(
-        'UPDATE company_settings SET name = ?, address = ?, tax_id = ?, phone = ?, site_name = ?, logo_data_url = ?, default_sender_label = ?, default_inspector_label = ?, google_sheet_id = ?, google_sheet_name = ?, auto_sync_sheets = ?, last_synced_at = ? WHERE id = ?'
+        'UPDATE company_settings SET name = ?, address = ?, tax_id = ?, phone = ?, site_name = ?, logo_data_url = ?, default_sender_label = ?, default_inspector_label = ?, google_sheet_id = ?, google_sheet_name = ?, apps_script_url = ?, auto_sync_sheets = ?, last_synced_at = ? WHERE id = ?'
       )
       .bind(
         next.name,
@@ -776,6 +797,7 @@ export const onRequest: PagesFunction = async (context) => {
         next.defaultInspectorLabel,
         next.googleSheetId,
         next.googleSheetName,
+        next.appsScriptUrl || '',
         next.autoSyncSheets ? 1 : 0,
         next.lastSyncedAt,
         'default'

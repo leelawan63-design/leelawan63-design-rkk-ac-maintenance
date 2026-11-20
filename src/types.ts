@@ -37,6 +37,7 @@ export interface CompanySettings {
   defaultInspectorLabel: string;
   googleSheetId: string;
   googleSheetName: string;
+  appsScriptUrl?: string;
   autoSyncSheets: boolean;
   lastSyncedAt: string;
 }

@@ -1,7 +1,19 @@
 import React, { useState } from 'react';
-import { RefreshCw, FilePlus2, Link2, ExternalLink, LogOut } from 'lucide-react';
+import {
+  RefreshCw,
+  FilePlus2,
+  Link2,
+  ExternalLink,
+  LogOut,
+  Check,
+  Copy,
+  Code2,
+  ChevronDown,
+  ChevronUp,
+} from 'lucide-react';
 import type { ACUnit, CleaningLog, CompanySettings } from '../types';
 import { THAI_MONTHS, formatThaiMonthYear, getTodayIso } from '../lib/thaiDate';
+import { getAppsScriptTemplate, type SheetsSyncSummary } from '../lib/googleSheetsSync';
 
 interface GoogleSheetsViewProps {
   company: CompanySettings;
@@ -13,7 +25,7 @@ interface GoogleSheetsViewProps {
   onGoogleSignOut: () => Promise<void>;
   onUpdateCompany: (payload: Partial<CompanySettings>) => Promise<void>;
   onCreateSpreadsheet: (title: string, year: number, month: number) => Promise<void>;
-  onSyncSpreadsheet: (year: number, month: number) => Promise<void>;
+  onSyncSpreadsheet: (year: number, month: number) => Promise<SheetsSyncSummary>;
 }
 
 export const GoogleSheetsView: React.FC<GoogleSheetsViewProps> = ({
@@ -33,6 +45,7 @@ export const GoogleSheetsView: React.FC<GoogleSheetsViewProps> = ({
   const [month, setMonth] = useState(Number(today.slice(5, 7)));
 
   const [sheetIdInput, setSheetIdInput] = useState(company.googleSheetId || '');
+  const [appsScriptInput, setAppsScriptInput] = useState(company.appsScriptUrl || '');
   const [newSheetTitle, setNewSheetTitle] = useState(
     company.googleSheetName || `รายงานล้างแอร์_${company.name}`
   );
@@ -43,10 +56,39 @@ export const GoogleSheetsView: React.FC<GoogleSheetsViewProps> = ({
     description: string;
   }>(null);
 
+  const [signingIn, setSigningIn] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [showScriptGuide, setShowScriptGuide] = useState(false);
+  const [copiedScript, setCopiedScript] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(
     null
   );
+
+  const hasAppsScript = Boolean(company.appsScriptUrl?.trim());
+  const canSyncNow = Boolean((googleToken && company.googleSheetId) || hasAppsScript);
+  const currentHost = typeof window !== 'undefined' ? window.location.hostname : '';
+
+  const handleSignInClick = async () => {
+    setSigningIn(true);
+    setFeedback(null);
+    try {
+      await onGoogleSignIn();
+      setFeedback({
+        type: 'success',
+        text: 'เชื่อมต่อบัญชี Google เรียบร้อยแล้ว พร้อมสร้างหรือซิงค์ Google Sheets',
+      });
+    } catch (err) {
+      setFeedback({
+        type: 'error',
+        text:
+          err instanceof Error
+            ? err.message
+            : 'ไม่สามารถลงชื่อเข้าใช้ Google ได้ กรุณาลองใหม่อีกครั้ง',
+      });
+    } finally {
+      setSigningIn(false);
+    }
+  };
 
   const handleSaveSheetId = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -66,6 +108,54 @@ export const GoogleSheetsView: React.FC<GoogleSheetsViewProps> = ({
     });
   };
 
+  const handleSaveAppsScriptUrl = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setFeedback(null);
+    const cleaned = appsScriptInput.trim();
+    if (cleaned && !cleaned.startsWith('https://script.google.com/')) {
+      setFeedback({
+        type: 'error',
+        text: 'URL ต้องขึ้นต้นด้วย https://script.google.com/macros/s/.../exec',
+      });
+      return;
+    }
+    await onUpdateCompany({ appsScriptUrl: cleaned });
+    setFeedback({
+      type: 'success',
+      text: cleaned
+        ? 'บันทึก Google Apps Script Web App URL เรียบร้อยแล้ว สามารถกด "ซิงค์ข้อมูลตอนนี้" หรือเปิด Auto-Sync ได้ทันที'
+        : 'ล้างการเชื่อมต่อ Google Apps Script URL แล้ว',
+    });
+  };
+
+  const handleCopyScript = async () => {
+    try {
+      await navigator.clipboard.writeText(getAppsScriptTemplate());
+      setCopiedScript(true);
+      setTimeout(() => setCopiedScript(false), 2500);
+    } catch {
+      setFeedback({
+        type: 'error',
+        text: 'ไม่สามารถคัดลอกอัตโนมัติได้ กรุณาคัดลอกโค้ดจากกล่องด้านล่างด้วยตนเอง',
+      });
+    }
+  };
+
+  const formatSyncResultText = (summary: SheetsSyncSummary, prefix: string): string => {
+    const parts: string[] = [];
+    if (summary.updatedRows > 0) parts.push(`อัปเดตส่วนที่แก้ไข ${summary.updatedRows} แถว`);
+    if (summary.appendedRows > 0) {
+      parts.push(`เพิ่มรายการใหม่ต่อท้าย ${summary.appendedRows} แถว (เรียงตามอาคาร)`);
+    }
+    if (summary.updatedTabs.length > 0 && summary.updatedRows === 0 && summary.appendedRows === 0) {
+      parts.push(`อัปเดตแท็บ ${summary.updatedTabs.join(', ')}`);
+    }
+    if (parts.length === 0) {
+      return `${prefix} — ข้อมูลใน Google Sheets ตรงกับระบบล่าสุดแล้ว (ไม่มีส่วนที่เปลี่ยนแปลง)`;
+    }
+    return `${prefix}: ${parts.join(' · ')}`;
+  };
+
   const handleProceedConfirmed = async () => {
     if (!confirmAction) return;
     setBusy(true);
@@ -78,17 +168,20 @@ export const GoogleSheetsView: React.FC<GoogleSheetsViewProps> = ({
           text: 'สร้างสเปรดชีตใหม่บน Google Sheets และซิงค์ข้อมูลทั้งหมดสำเร็จแล้ว',
         });
       } else if (confirmAction.type === 'sync') {
-        await onSyncSpreadsheet(year, month);
+        const summary = await onSyncSpreadsheet(year, month);
         setFeedback({
           type: 'success',
-          text: `ซิงค์ข้อมูลเดือน ${formatThaiMonthYear(year, month)} ไปยัง Google Sheets สำเร็จแล้ว`,
+          text: formatSyncResultText(
+            summary,
+            `ซิงค์ข้อมูลเดือน ${formatThaiMonthYear(year, month)} สำเร็จ`
+          ),
         });
       } else if (confirmAction.type === 'enable_auto') {
         await onUpdateCompany({ autoSyncSheets: true });
-        await onSyncSpreadsheet(year, month);
+        const summary = await onSyncSpreadsheet(year, month);
         setFeedback({
           type: 'success',
-          text: 'เปิดใช้งานซิงค์ Google Sheets อัตโนมัติและอัปเดตข้อมูลล่าสุดเรียบร้อยแล้ว',
+          text: formatSyncResultText(summary, 'เปิดใช้งานซิงค์ Google Sheets อัตโนมัติและอัปเดตล่าสุดแล้ว'),
         });
       }
       setConfirmAction(null);
@@ -111,7 +204,7 @@ export const GoogleSheetsView: React.FC<GoogleSheetsViewProps> = ({
             เชื่อมต่อและซิงค์ข้อมูล Google Sheets อัตโนมัติ
           </h1>
           <p className="text-sm text-[#64748B] mt-1">
-            ส่งข้อมูลสรุปรายเดือน รายการไม่ได้ล้าง ประวัติการล้างทั้งหมด ทะเบียนแอร์ทุกชั้นทุกอาคาร และผลงานช่างไปยัง Google Sheets ของคุณ
+            ซิงค์เฉพาะส่วนที่ถูกแก้ไข และหากมีข้อมูลเพิ่มใหม่จะเพิ่มต่อท้ายจากข้อมูลเดิมโดยเรียงลำดับตามอาคารให้ถูกต้อง
           </p>
         </div>
 
@@ -119,12 +212,12 @@ export const GoogleSheetsView: React.FC<GoogleSheetsViewProps> = ({
         <div className="p-4 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="space-y-1">
             <div className="text-sm font-semibold text-[#1E293B]">
-              1. บัญชี Google สำหรับเชื่อมต่อ Google Sheets
+              1. บัญชี Google สำหรับเชื่อมต่อ Google Sheets (OAuth)
             </div>
             <div className="text-xs text-[#64748B]">
               {googleToken
                 ? `เชื่อมต่อแล้วในนาม ${googleEmail || 'บัญชี Google'} (พร้อมซิงค์ข้อมูล)`
-                : 'ยังไม่ได้ลงชื่อเข้าใช้ Google กรุณาเชื่อมต่อบัญชี Google ก่อนซิงค์'}
+                : 'ยังไม่ได้ลงชื่อเข้าใช้ Google กดปุ่ม Sign in with Google เพื่อเชื่อมต่อ (หรือใช้ Google Apps Script ด้านล่างสำหรับโดเมนภายนอก)'}
             </div>
           </div>
 
@@ -140,7 +233,8 @@ export const GoogleSheetsView: React.FC<GoogleSheetsViewProps> = ({
           ) : (
             <button
               type="button"
-              onClick={onGoogleSignIn}
+              disabled={signingIn}
+              onClick={handleSignInClick}
               className="gsi-material-button shrink-0"
             >
               <div className="gsi-material-button-state" />
@@ -170,11 +264,39 @@ export const GoogleSheetsView: React.FC<GoogleSheetsViewProps> = ({
                     />
                   </svg>
                 </div>
-                <span className="gsi-material-button-contents">Sign in with Google</span>
+                <span className="gsi-material-button-contents">
+                  {signingIn ? 'กำลังเชื่อมต่อ...' : 'Sign in with Google'}
+                </span>
               </div>
             </button>
           )}
         </div>
+
+        {feedback && (
+          <div
+            className={`px-4 py-3 rounded-xl border text-sm space-y-1.5 ${
+              feedback.type === 'success'
+                ? 'bg-[#ECF6F1] border-[#C6E2D2] text-[#25593E]'
+                : 'bg-[#FDF0F2] border-[#F3CCD3] text-[#9D3E4E]'
+            }`}
+          >
+            <div>{feedback.text}</div>
+            {feedback.type === 'error' && feedback.text.includes('unauthorized-domain') && (
+              <div className="text-xs text-[#7F1D1D] pt-1">
+                วิธีแก้ 1: เพิ่มโดเมน <code className="bg-white/70 px-1.5 py-0.5 rounded">{currentHost}</code> ใน{' '}
+                <a
+                  href="https://console.firebase.google.com/project/gen-lang-client-0886823361/authentication/settings"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline font-medium"
+                >
+                  Firebase Console Authorized Domains
+                </a>{' '}
+                หรือ วิธีแก้ 2: ใช้การเชื่อมต่อผ่าน <strong>Google Apps Script Web App</strong> ด้านล่าง (ไม่ต้องตั้งค่า Firebase)
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Step 2: Create New or Link Existing Sheet */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -184,7 +306,7 @@ export const GoogleSheetsView: React.FC<GoogleSheetsViewProps> = ({
               สร้างไฟล์ Google Sheet ใหม่
             </div>
             <p className="text-xs text-[#64748B]">
-              ระบบจะสร้างไฟล์สเปรดชีตใหม่ใน Google Drive ของคุณพร้อม 6 แท็บรายงานครบชุด
+              ระบบจะสร้างไฟล์สเปรดชีตใหม่ใน Google Drive ของคุณพร้อม 6 แท็บรายงานครบชุด (ใช้เมื่อลงชื่อเข้าใช้ Google)
             </p>
             <input
               type="text"
@@ -248,6 +370,92 @@ export const GoogleSheetsView: React.FC<GoogleSheetsViewProps> = ({
           </form>
         </div>
 
+        {/* Alternative Direct Bridge: Google Apps Script Web App */}
+        <form
+          onSubmit={handleSaveAppsScriptUrl}
+          className="p-4 rounded-xl border border-[#D4E2EE] bg-[#F8FBFD] space-y-3"
+        >
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <div className="text-sm font-semibold text-[#1E293B] flex items-center gap-2">
+                <Code2 className="w-4 h-4 text-[#4A7C9B]" />
+                เชื่อมต่อตรงผ่าน Google Apps Script (ใช้ได้บน Cloudflare Pages ทุกเครื่อง ไม่ต้องล็อกอิน Pop-up)
+              </div>
+              <p className="text-xs text-[#64748B] mt-0.5">
+                เหมาะสำหรับใช้งานบนโดเมน <span className="font-mono-tabular">{currentHost || 'pages.dev'}</span> และให้ Auto-Sync ทำงานทุกครั้งที่มีการบันทึก/แก้ไขข้อมูลจากทุกเครื่อง
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowScriptGuide((v) => !v)}
+              className="h-8 px-3 rounded-lg border border-[#CBD5E1] bg-white hover:bg-[#F1F5F9] text-xs font-medium text-[#334155] inline-flex items-center gap-1.5 self-start sm:self-center cursor-pointer"
+            >
+              {showScriptGuide ? (
+                <>
+                  ซ่อนวิธีติดตั้ง <ChevronUp className="w-3.5 h-3.5" />
+                </>
+              ) : (
+                <>
+                  ดูวิธีติดตั้ง &amp; คัดลอกโค้ด <ChevronDown className="w-3.5 h-3.5" />
+                </>
+              )}
+            </button>
+          </div>
+
+          <div className="flex flex-col sm:flex-row gap-2">
+            <input
+              type="url"
+              value={appsScriptInput}
+              onChange={(e) => setAppsScriptInput(e.target.value)}
+              placeholder="วาง Web App URL เช่น https://script.google.com/macros/s/.../exec"
+              className="flex-1 h-9 px-3 rounded-lg border border-[#CBD5E1] bg-white text-sm font-mono-tabular"
+            />
+            <button
+              type="submit"
+              className="h-9 px-4 rounded-lg bg-[#1E293B] hover:bg-[#334155] text-white text-xs font-medium whitespace-nowrap cursor-pointer"
+            >
+              บันทึก Web App URL
+            </button>
+          </div>
+
+          {showScriptGuide && (
+            <div className="p-3.5 rounded-lg bg-white border border-[#DCE4EE] space-y-2.5 text-xs text-[#334155]">
+              <div className="font-semibold text-[#1E293B]">
+                วิธีตั้งค่า Google Apps Script (ทำครั้งเดียว ~1 นาที):
+              </div>
+              <ol className="list-decimal pl-4 space-y-1 text-[#475569]">
+                <li>เปิดไฟล์ Google Sheets ที่ต้องการ แล้วเลือกเมนู <strong>ส่วนขยาย (Extensions) → Apps Script</strong></li>
+                <li>ลบโค้ดเดิมออกทั้งหมด แล้ววางโค้ดด้านล่างลงไป (กดปุ่ม <strong>คัดลอกโค้ด</strong> ได้เลย)</li>
+                <li>กด <strong>การทำให้ใช้งานได้ (Deploy) → การทำให้ใช้งานได้รายการใหม่ (New deployment)</strong></li>
+                <li>เลือกประเภทเป็น <strong>เว็บแอป (Web app)</strong> · ตั้ง <strong>Execute as: Me</strong> · <strong>Who has access: Anyone</strong> แล้วกด Deploy</li>
+                <li>คัดลอก <strong>Web app URL</strong> (ลงท้ายด้วย <code className="bg-[#F1F5F9] px-1 rounded">/exec</code>) มาวางในช่องด้านบนแล้วกดบันทึก</li>
+              </ol>
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={handleCopyScript}
+                  className="h-8 px-3 rounded-lg bg-[#EAF2F8] hover:bg-[#DCE9F4] text-[#2F5A78] font-medium inline-flex items-center gap-1.5 cursor-pointer"
+                >
+                  {copiedScript ? (
+                    <>
+                      <Check className="w-3.5 h-3.5 text-[#25593E]" />
+                      คัดลอกโค้ดเรียบร้อยแล้ว
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5" />
+                      คัดลอกโค้ด Apps Script
+                    </>
+                  )}
+                </button>
+              </div>
+              <pre className="max-h-52 overflow-auto p-3 rounded-lg bg-[#0F172A] text-[#E2E8F0] text-[11px] leading-relaxed font-mono">
+                {getAppsScriptTemplate()}
+              </pre>
+            </div>
+          )}
+        </form>
+
         {/* Step 3: Manual Sync & Auto-Sync Control */}
         <div className="p-4 rounded-xl bg-[#F4F8FB] border border-[#D4E2EE] space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -287,17 +495,15 @@ export const GoogleSheetsView: React.FC<GoogleSheetsViewProps> = ({
               </select>
               <button
                 type="button"
-                disabled={!googleToken || !company.googleSheetId || busy}
+                disabled={!canSyncNow || busy}
                 onClick={() =>
                   setConfirmAction({
                     type: 'sync',
-                    title: 'ยืนยันการอัปเดตข้อมูลไปยัง Google Sheets',
-                    description: `ระบบจะอัปเดต 6 แท็บรายงาน (สรุปประจำเดือน ${formatThaiMonthYear(
+                    title: 'ยืนยันการซิงค์ข้อมูลไปยัง Google Sheets',
+                    description: `ระบบจะตรวจสอบความเปลี่ยนแปลงของเดือน ${formatThaiMonthYear(
                       year,
                       month
-                    )}, รายการไม่ได้ล้าง, ประวัติการล้างแอร์, สรุปแอร์ทุกชั้นทุกอาคาร, ทะเบียนแอร์, สรุปผลงานช่าง) ลงในไฟล์ Spreadsheet ID: ${
-                      company.googleSheetId
-                    }`,
+                    )} อัปเดตเฉพาะแถว/ส่วนที่ถูกแก้ไข และเพิ่มข้อมูลใหม่ต่อท้ายจากข้อมูลเดิมโดยเรียงลำดับตามอาคารให้ถูกต้อง`,
                   })
                 }
                 className="h-9 px-4 rounded-lg bg-[#4A7C9B] hover:bg-[#3C6884] text-white text-xs font-medium flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
@@ -314,24 +520,25 @@ export const GoogleSheetsView: React.FC<GoogleSheetsViewProps> = ({
                 เปิดซิงค์ Google Sheets อัตโนมัติ (Auto-Sync)
               </div>
               <div className="text-xs text-[#64748B]">
-                เมื่อบันทึกงานล้างประจำวัน แก้ไข หรือเพิ่มทะเบียนเครื่อง ระบบจะอัปเดต Google Sheets ให้อัตโนมัติ (ขณะลงชื่อเข้าใช้ Google)
+                เมื่อบันทึกงานล้างประจำวัน แก้ไข หรือเพิ่มทะเบียนเครื่อง ระบบจะซิงค์เฉพาะส่วนที่เปลี่ยนแปลงและเพิ่มรายการใหม่ต่อท้ายตามลำดับอาคารให้อัตโนมัติ
               </div>
             </div>
             <button
               type="button"
               onClick={async () => {
                 if (!company.autoSyncSheets) {
-                  if (!googleToken || !company.googleSheetId) {
+                  if (!canSyncNow) {
                     setFeedback({
                       type: 'error',
-                      text: 'กรุณาเชื่อมต่อบัญชี Google และระบุ Spreadsheet ID ก่อนเปิดซิงค์อัตโนมัติ',
+                      text: 'กรุณาเชื่อมต่อบัญชี Google พร้อมระบุ Spreadsheet ID หรือบันทึก Google Apps Script Web App URL ก่อนเปิดซิงค์อัตโนมัติ',
                     });
                     return;
                   }
                   setConfirmAction({
                     type: 'enable_auto',
                     title: 'ยืนยันเปิดใช้งานซิงค์ Google Sheets อัตโนมัติ',
-                    description: `เมื่อเปิดใช้งาน ระบบจะอัปเดตข้อมูลลงใน Spreadsheet ID: ${company.googleSheetId} ทุกครั้งที่มีการบันทึกหรือแก้ไขข้อมูล`,
+                    description:
+                      'เมื่อเปิดใช้งาน ระบบจะซิงค์เฉพาะส่วนที่ถูกแก้ไข และเพิ่มข้อมูลใหม่ต่อท้ายจากข้อมูลเดิมโดยเรียงตามอาคารทุกครั้งที่มีการบันทึกหรือแก้ไขข้อมูล',
                   });
                 } else {
                   await onUpdateCompany({ autoSyncSheets: false });
@@ -348,28 +555,16 @@ export const GoogleSheetsView: React.FC<GoogleSheetsViewProps> = ({
             </button>
           </div>
         </div>
-
-        {feedback && (
-          <div
-            className={`px-4 py-3 rounded-xl border text-sm ${
-              feedback.type === 'success'
-                ? 'bg-[#ECF6F1] border-[#C6E2D2] text-[#25593E]'
-                : 'bg-[#FDF0F2] border-[#F3CCD3] text-[#9D3E4E]'
-            }`}
-          >
-            {feedback.text}
-          </div>
-        )}
       </div>
 
-      {/* Explicit Confirmation Dialog (Mandatory for Workspace API writes) */}
+      {/* Explicit Confirmation Dialog */}
       {confirmAction && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/35 p-4">
           <div className="w-full max-w-md bg-white border border-[#DCE4EE] rounded-xl p-6 space-y-4 shadow-lg">
             <h3 className="text-base font-semibold text-[#1E293B]">{confirmAction.title}</h3>
             <p className="text-sm text-[#475569] leading-relaxed">{confirmAction.description}</p>
             <div className="text-xs text-[#64748B] bg-[#F8FAFC] p-3 rounded-lg border border-[#E2E8F0]">
-              แท็บที่จะอัปเดต: สรุปประจำเดือน · รายการไม่ได้ล้าง · ประวัติการล้างแอร์ · สรุปแอร์ทุกชั้นทุกอาคาร · ทะเบียนแอร์ทุกอาคาร · สรุปผลงานช่างเทคนิค
+              รูปแบบการซิงค์: อัปเดตเฉพาะส่วนที่แก้ไข · เพิ่มข้อมูลใหม่ต่อท้ายจากข้อมูลเดิมโดยเรียงตามอาคาร · ไม่ล้างข้อมูลที่ไม่ได้เปลี่ยนแปลง
             </div>
             <div className="flex justify-end gap-2">
               <button

@@ -85,7 +85,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   };
 
   const handleQuickSync = async () => {
-    if (!googleToken || !company.googleSheetId) {
+    const hasAppsScript = Boolean(company.appsScriptUrl?.trim());
+    if (!hasAppsScript && (!googleToken || !company.googleSheetId)) {
       onNavigate('sheets');
       return;
     }

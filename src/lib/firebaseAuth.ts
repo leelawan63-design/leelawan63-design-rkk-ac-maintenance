@@ -25,6 +25,29 @@ let isSigningIn = false;
 let cachedAccessToken: string | null = null;
 let cachedGoogleUser: User | null = null;
 
+export function formatGoogleAuthError(err: unknown): string {
+  const code =
+    typeof err === 'object' && err !== null && 'code' in err
+      ? String((err as { code?: unknown }).code || '')
+      : '';
+  const message = err instanceof Error ? err.message : String(err || '');
+
+  if (code === 'auth/unauthorized-domain' || message.includes('unauthorized-domain')) {
+    const host = typeof window !== 'undefined' ? window.location.hostname : 'โดเมนนี้';
+    return `โดเมน "${host}" ยังไม่ได้รับอนุญาตใน Firebase Auth (auth/unauthorized-domain) — กรุณาเพิ่ม "${host}" ใน Firebase Console → Authentication → Settings → Authorized domains หรือเชื่อมต่อผ่านวิธี Google Apps Script ด้านล่างแทนได้ทันที`;
+  }
+  if (code === 'auth/popup-blocked') {
+    return 'เบราว์เซอร์บล็อกหน้าต่าง Pop-up กรุณากดอนุญาต Pop-up สำหรับเว็บไซต์นี้แล้วลองใหม่อีกครั้ง';
+  }
+  if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+    return 'ปิดหน้าต่างลงชื่อเข้าใช้ Google ก่อนเสร็จสิ้น กรุณากดเชื่อมต่อใหม่อีกครั้ง';
+  }
+  if (code === 'auth/network-request-failed') {
+    return 'ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ Google ได้ กรุณาตรวจสอบอินเทอร์เน็ตแล้วลองใหม่';
+  }
+  return message || 'ไม่สามารถลงชื่อเข้าใช้ Google ได้ กรุณาลองใหม่อีกครั้ง';
+}
+
 export function initGoogleSheetsAuth(
   onAuthSuccess?: (user: User, token: string) => void,
   onAuthFailure?: () => void
@@ -55,6 +78,8 @@ export async function signInWithGoogleSheets(): Promise<{
     cachedAccessToken = credential.accessToken;
     cachedGoogleUser = result.user;
     return { user: result.user, accessToken: cachedAccessToken };
+  } catch (err) {
+    throw new Error(formatGoogleAuthError(err));
   } finally {
     isSigningIn = false;
   }
