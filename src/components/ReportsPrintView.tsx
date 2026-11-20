@@ -87,7 +87,10 @@ export const ReportsPrintView: React.FC<ReportsPrintViewProps> = ({
   const [selectedAcType, setSelectedAcType] = useState<'all' | 'normal' | 'vrf'>('all');
   const [uncleanedCategory, setUncleanedCategory] = useState<UncleanedFilter>('all');
 
+  const [dailyDateMode, setDailyDateMode] = useState<'single' | 'range'>('single');
   const [dailyDate, setDailyDate] = useState(today);
+  const [dailyRangeStart, setDailyRangeStart] = useState(today);
+  const [dailyRangeEnd, setDailyRangeEnd] = useState(today);
   const [dailyBuilding, setDailyBuilding] = useState('all');
   const [dailyStatusFilter, setDailyStatusFilter] = useState<DailyStatusFilter>('all');
 
@@ -125,7 +128,10 @@ export const ReportsPrintView: React.FC<ReportsPrintViewProps> = ({
     selectedBuilding,
     selectedAcType,
     uncleanedCategory,
+    dailyDateMode,
     dailyDate,
+    dailyRangeStart,
+    dailyRangeEnd,
     dailyBuilding,
     dailyStatusFilter,
     rangeStart,
@@ -248,10 +254,28 @@ export const ReportsPrintView: React.FC<ReportsPrintViewProps> = ({
     return groups;
   }, [monthlyCleanedLogs, activeUnitCountsByBuilding]);
 
+  const effectiveDailyStart =
+    dailyDateMode === 'single'
+      ? dailyDate
+      : dailyRangeStart <= dailyRangeEnd
+        ? dailyRangeStart
+        : dailyRangeEnd;
+
+  const effectiveDailyEnd =
+    dailyDateMode === 'single'
+      ? dailyDate
+      : dailyRangeStart <= dailyRangeEnd
+        ? dailyRangeEnd
+        : dailyRangeStart;
+
+  const isDailyMultiDay =
+    dailyDateMode === 'range' && effectiveDailyStart !== effectiveDailyEnd;
+
   const dailyLogs = useMemo(() => {
     return logs
       .filter((l) => {
-        if (l.date !== dailyDate) return false;
+        if (effectiveDailyStart && l.date < effectiveDailyStart) return false;
+        if (effectiveDailyEnd && l.date > effectiveDailyEnd) return false;
         if (dailyBuilding !== 'all' && l.building !== dailyBuilding) return false;
         if (dailyStatusFilter === 'cleaned' && l.status !== 'cleaned') return false;
         if (dailyStatusFilter === 'uncleaned_all' && l.status === 'cleaned') return false;
@@ -266,13 +290,15 @@ export const ReportsPrintView: React.FC<ReportsPrintViewProps> = ({
         return true;
       })
       .sort((a, b) => {
+        const dCmp = a.date.localeCompare(b.date);
+        if (dCmp !== 0) return dCmp;
         const bCmp = a.building.localeCompare(b.building, 'th');
         if (bCmp !== 0) return bCmp;
         const fCmp = a.floor.localeCompare(b.floor, 'th', { numeric: true });
         if (fCmp !== 0) return fCmp;
         return a.unitCode.localeCompare(b.unitCode, 'th', { numeric: true });
       });
-  }, [logs, dailyDate, dailyBuilding, dailyStatusFilter]);
+  }, [logs, effectiveDailyStart, effectiveDailyEnd, dailyBuilding, dailyStatusFilter]);
 
   const rangeLogs = useMemo(() => {
     return logs.filter((l) => {
@@ -803,14 +829,57 @@ export const ReportsPrintView: React.FC<ReportsPrintViewProps> = ({
           {activeReport === 'daily_signoff' && (
             <>
               <div className="space-y-1">
-                <label className="block text-xs text-[#64748B]">วันที่เข้าล้าง</label>
-                <input
-                  type="date"
-                  value={dailyDate}
-                  onChange={(e) => setDailyDate(e.target.value)}
-                  className="w-full h-9 px-3 rounded-lg border border-[#CBD5E1] text-sm"
-                />
+                <label className="block text-xs text-[#64748B]">รูปแบบช่วงวันที่</label>
+                <select
+                  value={dailyDateMode}
+                  onChange={(e) => {
+                    const mode = e.target.value as 'single' | 'range';
+                    if (mode === 'range' && dailyDateMode === 'single') {
+                      setDailyRangeStart(dailyDate);
+                      if (dailyRangeEnd < dailyDate) {
+                        setDailyRangeEnd(dailyDate);
+                      }
+                    }
+                    setDailyDateMode(mode);
+                  }}
+                  className="w-full h-9 px-3 rounded-lg border border-[#CBD5E1] bg-white text-sm"
+                >
+                  <option value="single">วันเดียว (รายวัน)</option>
+                  <option value="range">ช่วงระหว่างวันที่ (รายสัปดาห์ / กำหนดเอง)</option>
+                </select>
               </div>
+              {dailyDateMode === 'single' ? (
+                <div className="space-y-1">
+                  <label className="block text-xs text-[#64748B]">วันที่เข้าล้าง</label>
+                  <input
+                    type="date"
+                    value={dailyDate}
+                    onChange={(e) => setDailyDate(e.target.value)}
+                    className="w-full h-9 px-3 rounded-lg border border-[#CBD5E1] text-sm"
+                  />
+                </div>
+              ) : (
+                <>
+                  <div className="space-y-1">
+                    <label className="block text-xs text-[#64748B]">ตั้งแต่วันที่</label>
+                    <input
+                      type="date"
+                      value={dailyRangeStart}
+                      onChange={(e) => setDailyRangeStart(e.target.value)}
+                      className="w-full h-9 px-3 rounded-lg border border-[#CBD5E1] text-sm"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="block text-xs text-[#64748B]">ถึงวันที่</label>
+                    <input
+                      type="date"
+                      value={dailyRangeEnd}
+                      onChange={(e) => setDailyRangeEnd(e.target.value)}
+                      className="w-full h-9 px-3 rounded-lg border border-[#CBD5E1] text-sm"
+                    />
+                  </div>
+                </>
+              )}
               <div className="space-y-1">
                 <label className="block text-xs text-[#64748B]">อาคาร</label>
                 <select
@@ -1634,8 +1703,14 @@ export const ReportsPrintView: React.FC<ReportsPrintViewProps> = ({
                 <td className="print-shell-cell">
                   <div className="space-y-3.5">
             {renderLetterhead(
-              'บัญชีรายการเครื่องปรับอากาศที่เข้าล้าง (รายวัน)',
-              `ประจำวันที่ ${formatThaiDate(dailyDate)} · ${
+              isDailyMultiDay
+                ? 'บัญชีรายการเครื่องปรับอากาศที่เข้าล้าง (ตามช่วงวันที่)'
+                : 'บัญชีรายการเครื่องปรับอากาศที่เข้าล้าง (รายวัน)',
+              `${
+                isDailyMultiDay
+                  ? `ระหว่างวันที่ ${formatThaiDate(effectiveDailyStart)} – ${formatThaiDate(effectiveDailyEnd)}`
+                  : `ประจำวันที่ ${formatThaiDate(effectiveDailyStart)}`
+              } · ${
                 dailyBuilding === 'all' ? 'ทุกอาคาร' : formatReportBuildingName(dailyBuilding)
               }${dailyStatusFilter !== 'all' ? ` · ${DAILY_STATUS_FILTER_LABELS[dailyStatusFilter]}` : ''}`
             )}
@@ -1661,42 +1736,99 @@ export const ReportsPrintView: React.FC<ReportsPrintViewProps> = ({
               <thead>
                 <tr className="bg-[#EEF4F9] text-[#1E293B]">
                   <th className="border border-[#CBD5E1] py-1 px-1 text-center w-[5%]">ลำดับ</th>
+                  {isDailyMultiDay && (
+                    <th
+                      className={`border border-[#CBD5E1] py-1 px-1 text-center ${
+                        showDailyTechnicianCol ? 'w-[9%]' : 'w-[10%]'
+                      }`}
+                    >
+                      วันที่
+                    </th>
+                  )}
                   <th
                     className={`border border-[#CBD5E1] py-1 px-1 text-left ${
-                      showDailyTechnicianCol ? 'w-[15%]' : 'w-[17%]'
+                      isDailyMultiDay
+                        ? showDailyTechnicianCol
+                          ? 'w-[13%]'
+                          : 'w-[15%]'
+                        : showDailyTechnicianCol
+                          ? 'w-[15%]'
+                          : 'w-[17%]'
                     }`}
                   >
                     อาคาร
                   </th>
-                  <th className="border border-[#CBD5E1] py-1 px-1 text-center w-[6%]">ชั้น</th>
+                  <th
+                    className={`border border-[#CBD5E1] py-1 px-1 text-center ${
+                      isDailyMultiDay ? 'w-[5%]' : 'w-[6%]'
+                    }`}
+                  >
+                    ชั้น
+                  </th>
                   <th
                     className={`border border-[#CBD5E1] py-1 px-1 text-left ${
-                      showDailyTechnicianCol ? 'w-[16%]' : 'w-[20%]'
+                      isDailyMultiDay
+                        ? showDailyTechnicianCol
+                          ? 'w-[15%]'
+                          : 'w-[18%]'
+                        : showDailyTechnicianCol
+                          ? 'w-[16%]'
+                          : 'w-[20%]'
                     }`}
                   >
                     ห้อง
                   </th>
                   <th
                     className={`border border-[#CBD5E1] py-1 px-1 text-left ${
-                      showDailyTechnicianCol ? 'w-[11%]' : 'w-[12%]'
+                      isDailyMultiDay
+                        ? showDailyTechnicianCol
+                          ? 'w-[11%]'
+                          : 'w-[12%]'
+                        : showDailyTechnicianCol
+                          ? 'w-[11%]'
+                          : 'w-[12%]'
                     }`}
                   >
                     หมายเลขเครื่อง
                   </th>
-                  <th className="border border-[#CBD5E1] py-1 px-1 text-left w-[9%]">ประเภท</th>
                   <th
                     className={`border border-[#CBD5E1] py-1 px-1 text-left ${
-                      showDailyTechnicianCol ? 'w-[14%]' : 'w-[15%]'
+                      isDailyMultiDay && showDailyTechnicianCol ? 'w-[8%]' : 'w-[9%]'
+                    }`}
+                  >
+                    ประเภท
+                  </th>
+                  <th
+                    className={`border border-[#CBD5E1] py-1 px-1 text-left ${
+                      isDailyMultiDay
+                        ? showDailyTechnicianCol
+                          ? 'w-[12%]'
+                          : 'w-[13%]'
+                        : showDailyTechnicianCol
+                          ? 'w-[14%]'
+                          : 'w-[15%]'
                     }`}
                   >
                     สถานะ
                   </th>
                   {showDailyTechnicianCol && (
-                    <th className="border border-[#CBD5E1] py-1 px-1 text-left w-[12%]">ช่างผู้ล้าง</th>
+                    <th
+                      className={`border border-[#CBD5E1] py-1 px-1 text-left ${
+                        isDailyMultiDay ? 'w-[11%]' : 'w-[12%]'
+                      }`}
+                    >
+                      ช่างผู้ล้าง
+                    </th>
                   )}
                   <th
                     className={`border border-[#CBD5E1] py-1 px-1 text-left ${
-                      showDailyTechnicianCol ? 'w-[12%]' : 'w-[16%]'
+                      isDailyMultiDay
+                        ? showDailyTechnicianCol
+                          ? 'w-[11%]'
+                          : 'w-[13%]'
+                        : showDailyTechnicianCol
+                          ? 'w-[12%]'
+                          : 'w-[16%]'
                     }`}
                   >
                     หมายเหตุ
@@ -1707,10 +1839,12 @@ export const ReportsPrintView: React.FC<ReportsPrintViewProps> = ({
                 {dailyLogs.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={showDailyTechnicianCol ? 9 : 8}
+                      colSpan={8 + (isDailyMultiDay ? 1 : 0) + (showDailyTechnicianCol ? 1 : 0)}
                       className="border border-[#CBD5E1] py-8 text-center text-[#64748B]"
                     >
-                      ยังไม่มีบันทึกการเข้าล้างในวันที่ {formatThaiDate(dailyDate)}
+                      {isDailyMultiDay
+                        ? `ยังไม่มีบันทึกการเข้าล้างในช่วงวันที่ ${formatThaiDate(effectiveDailyStart)} – ${formatThaiDate(effectiveDailyEnd)}`
+                        : `ยังไม่มีบันทึกการเข้าล้างในวันที่ ${formatThaiDate(effectiveDailyStart)}`}
                     </td>
                   </tr>
                 ) : (
@@ -1725,6 +1859,11 @@ export const ReportsPrintView: React.FC<ReportsPrintViewProps> = ({
                         <td className="border border-[#CBD5E1] py-[2.5px] px-1 text-center tabular-nums">
                           {idx + 1}
                         </td>
+                        {isDailyMultiDay && (
+                          <td className="border border-[#CBD5E1] py-[2.5px] px-1 text-center whitespace-nowrap tabular-nums">
+                            {formatThaiDate(l.date, true)}
+                          </td>
+                        )}
                         <td className="border border-[#CBD5E1] py-[2.5px] px-1 break-words">
                           {formatReportBuildingName(l.building)}
                         </td>
