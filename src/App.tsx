@@ -566,7 +566,7 @@ function AppContent() {
             <ReportsPrintView company={company} units={units} logs={logs} />
           )}
 
-          {activeTab === 'guide' && <UserGuideView />}
+          {activeTab === 'guide' && <UserGuideView user={user} />}
 
           {activeTab === 'sheets' && (
             <GoogleSheetsView

@@ -9,6 +9,7 @@ import {
   BookOpen,
 } from 'lucide-react';
 import { useDeviceMode } from '../lib/deviceMode';
+import type { UserAccount } from '../types';
 
 type GuideSectionId =
   | 'all'
@@ -30,19 +31,24 @@ interface GuideSection {
   illustration: React.ReactNode;
 }
 
-const GUIDE_TABS: Array<{ id: GuideSectionId; label: string }> = [
+const GUIDE_TABS: Array<{ id: GuideSectionId; label: string; adminOnly?: boolean }> = [
   { id: 'all', label: 'ดูทั้งหมด' },
   { id: 'login_device', label: '1. เข้าสู่ระบบและเลือกเครื่อง' },
   { id: 'daily_entry', label: '2. กรอกงานล้างรายวัน' },
   { id: 'history', label: '3. ประวัติย้อนหลัง' },
   { id: 'inventory_tech', label: '4. ทะเบียนแอร์และช่าง' },
   { id: 'reports', label: '5. พิมพ์รายงาน A4 / Excel' },
-  { id: 'sheets_admin', label: '6. ซิงค์ Sheets และสิทธิ์' },
+  { id: 'sheets_admin', label: '6. ซิงค์ Sheets และสิทธิ์', adminOnly: true },
 ];
 
-export const UserGuideView: React.FC = () => {
+interface UserGuideViewProps {
+  user: UserAccount;
+}
+
+export const UserGuideView: React.FC<UserGuideViewProps> = ({ user }) => {
   const { deviceMode } = useDeviceMode();
   const [selectedTab, setSelectedTab] = useState<GuideSectionId>('all');
+  const isAdmin = user.role === 'super_admin';
 
   const sections: GuideSection[] = [
     {
@@ -456,8 +462,13 @@ export const UserGuideView: React.FC = () => {
     },
   ];
 
+  const allowedTabs = GUIDE_TABS.filter((tab) => isAdmin || !tab.adminOnly);
+  const allowedSections = sections.filter((s) => isAdmin || s.id !== 'sheets_admin');
+  const effectiveTab = !isAdmin && selectedTab === 'sheets_admin' ? 'all' : selectedTab;
   const visibleSections =
-    selectedTab === 'all' ? sections : sections.filter((s) => s.id === selectedTab);
+    effectiveTab === 'all'
+      ? allowedSections
+      : allowedSections.filter((s) => s.id === effectiveTab);
 
   return (
     <div className="space-y-5">
@@ -476,13 +487,13 @@ export const UserGuideView: React.FC = () => {
         </div>
 
         <div className="flex flex-wrap gap-1.5 pt-2 border-t border-[#E8EEF4]">
-          {GUIDE_TABS.map((tab) => (
+          {allowedTabs.map((tab) => (
             <button
               key={tab.id}
               type="button"
               onClick={() => setSelectedTab(tab.id)}
               className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
-                selectedTab === tab.id
+                effectiveTab === tab.id
                   ? 'bg-[#4A7C9B] text-white'
                   : 'bg-[#F4F7FA] text-[#475569] hover:bg-[#EAF2F8] hover:text-[#2F5A78]'
               }`}
