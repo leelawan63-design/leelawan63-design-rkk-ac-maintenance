@@ -7,6 +7,7 @@ import {
   computeMonthlyCleaningMatrix,
   computeTechnicianStats,
   computeUncleanedSummary,
+  formatReportBuildingName,
 } from '../lib/reportCalc';
 import { THAI_MONTHS, formatThaiMonthYear, getTodayIso } from '../lib/thaiDate';
 import { exportAllReportsToSingleExcel } from '../lib/excelExport';
@@ -291,7 +292,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div>
-                        <div className="text-sm font-semibold text-[#1E293B]">{b.building}</div>
+                        <div className="text-sm font-semibold text-[#1E293B]">
+                          {formatReportBuildingName(b.building)}
+                        </div>
                         <div className="text-xs text-[#64748B] tabular-nums">
                           ปกติ {b.normalActive} · VRF/VRV {b.vrfActive}
                         </div>
@@ -338,7 +341,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     return (
                       <tr key={b.building} className="hover:bg-[#F8FAFC]">
                         <td className="py-3 pr-3 font-medium text-[#1E293B]">
-                          {b.building}
+                          {formatReportBuildingName(b.building)}
                           <span className="block text-xs font-normal text-[#64748B] tabular-nums">
                             ปกติ {b.normalActive} · VRF/VRV {b.vrfActive}
                           </span>
@@ -426,8 +429,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       <span>
                         ปกติ {t.normalCount} · VRF/VRV {t.vrfCount} · ไม่ได้ล้าง {t.uncleanedCount}
                       </span>
-                      <span className="truncate max-w-[200px]" title={t.buildings.join(', ')}>
-                        {t.buildings.join(', ')}
+                      <span
+                        className="truncate max-w-[200px]"
+                        title={t.buildings.map(formatReportBuildingName).join(', ')}
+                      >
+                        {t.buildings.map(formatReportBuildingName).join(', ')}
                       </span>
                     </div>
                   </div>

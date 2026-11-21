@@ -9,7 +9,11 @@ import {
   X,
 } from 'lucide-react';
 import type { ACType, ACUnit, ACUnitStatus } from '../types';
-import { computeBuildingFloorInventory, computeContractCounts } from '../lib/reportCalc';
+import {
+  computeBuildingFloorInventory,
+  computeContractCounts,
+  formatReportBuildingName,
+} from '../lib/reportCalc';
 import {
   downloadInventoryImportTemplate,
   parseInventoryExcelFile,
@@ -316,7 +320,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                   <option value="all">ทุกอาคาร</option>
                   {contract.buildings.map((b) => (
                     <option key={b} value={b}>
-                      {b}
+                      {formatReportBuildingName(b)}
                     </option>
                   ))}
                 </select>
@@ -374,7 +378,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                       </div>
                       <div className="text-sm font-medium text-[#1E293B] mt-0.5">{u.room}</div>
                       <div className="text-xs text-[#64748B]">
-                        {u.building} · ชั้น {u.floor}
+                        {formatReportBuildingName(u.building)} · ชั้น {u.floor}
                       </div>
                     </div>
                     <span
@@ -444,7 +448,9 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                       }
                     >
                       <td className="py-2.5 px-4 tabular-nums text-xs text-[#64748B]">{idx + 1}</td>
-                      <td className="py-2.5 px-4 font-medium">{u.building}</td>
+                      <td className="py-2.5 px-4 font-medium">
+                        {formatReportBuildingName(u.building)}
+                      </td>
                       <td className="py-2.5 px-4 whitespace-nowrap">{u.floor}</td>
                       <td className="py-2.5 px-4">{u.room}</td>
                       <td className="py-2.5 px-4 font-mono-tabular font-medium text-[#3B6684] whitespace-nowrap">
@@ -515,7 +521,9 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                   <React.Fragment key={b.building}>
                     {b.floors.map((f) => (
                       <tr key={`${b.building}-${f.floor}`} className="hover:bg-[#F8FAFC]">
-                        <td className="py-2.5 px-4 text-[#334155]">{f.building}</td>
+                        <td className="py-2.5 px-4 text-[#334155]">
+                          {formatReportBuildingName(f.building)}
+                        </td>
                         <td className="py-2.5 px-4 text-[#334155]">{f.floor}</td>
                         <td className="py-2.5 px-4 text-right tabular-nums">{f.normalActive}</td>
                         <td className="py-2.5 px-4 text-right tabular-nums">{f.vrfActive}</td>
@@ -528,7 +536,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                       </tr>
                     ))}
                     <tr className="bg-[#F2F6FA] font-semibold text-[#254B66]">
-                      <td className="py-2.5 px-4">รวม {b.building}</td>
+                      <td className="py-2.5 px-4">รวม {formatReportBuildingName(b.building)}</td>
                       <td className="py-2.5 px-4">{b.floors.length} ชั้น</td>
                       <td className="py-2.5 px-4 text-right tabular-nums">{b.normalActive}</td>
                       <td className="py-2.5 px-4 text-right tabular-nums">{b.vrfActive}</td>
@@ -723,7 +731,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
             <h3 className="text-base font-semibold text-[#1E293B]">ยืนยันลบเครื่องปรับอากาศ</h3>
             <p className="text-sm text-[#475569]">
               ต้องการลบ <span className="font-mono-tabular font-semibold">{deletingUnit.unitCode}</span>{' '}
-              ({deletingUnit.building} · {deletingUnit.room}) ออกจากทะเบียนใช่หรือไม่?
+              ({formatReportBuildingName(deletingUnit.building)} · {deletingUnit.room}) ออกจากทะเบียนใช่หรือไม่?
               (หากต้องการเก็บประวัติไว้โดยไม่นับรวม แนะนำให้เปลี่ยนสถานะเป็น &ldquo;ยกเลิก&rdquo;)
             </p>
             <div className="flex justify-end gap-2">

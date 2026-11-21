@@ -11,6 +11,7 @@ import type {
 import { CLEANING_STATUS_LABELS } from '../types';
 import type { TechnicianOption } from '../lib/api';
 import { useDeviceMode } from '../lib/deviceMode';
+import { formatReportBuildingName } from '../lib/reportCalc';
 import { formatThaiDate, formatThaiMonthYear, getMonthDateRange, getTodayIso } from '../lib/thaiDate';
 
 interface DailyEntryViewProps {
@@ -430,7 +431,7 @@ export const DailyEntryView: React.FC<DailyEntryViewProps> = ({
               >
                 {buildings.map((b) => (
                   <option key={b} value={b}>
-                    {b}
+                    {formatReportBuildingName(b)}
                   </option>
                 ))}
               </select>
@@ -501,7 +502,7 @@ export const DailyEntryView: React.FC<DailyEntryViewProps> = ({
                   1. ดึงข้อมูลเครื่องปรับอากาศจากทะเบียนในระบบ
                 </h2>
                 <p className="text-xs text-[#64748B]">
-                  อาคาร: {activeBuilding || '-'} · เหลือที่ยังไม่บันทึกเดือนนี้{' '}
+                  อาคาร: {formatReportBuildingName(activeBuilding) || '-'} · เหลือที่ยังไม่บันทึกเดือนนี้{' '}
                   {filteredBuildingUnits.length} เครื่อง
                   {loggedInMonthCountInBuilding > 0 &&
                     ` (ซ่อนที่บันทึกเดือนนี้แล้ว ${loggedInMonthCountInBuilding} เครื่อง)`}
@@ -680,7 +681,9 @@ export const DailyEntryView: React.FC<DailyEntryViewProps> = ({
                 </h2>
                 <p className="text-xs text-[#64748B]">
                   กดเปิดฟอร์มเฉพาะกรณีพบเครื่องปรับอากาศใหม่ที่ยังไม่มีในทะเบียนของอาคาร{' '}
-                  <span className="font-medium text-[#1E293B]">{activeBuilding || '-'}</span>
+                  <span className="font-medium text-[#1E293B]">
+                    {formatReportBuildingName(activeBuilding) || '-'}
+                  </span>
                 </p>
               </div>
               <button
@@ -705,7 +708,9 @@ export const DailyEntryView: React.FC<DailyEntryViewProps> = ({
                   </h2>
                   <p className="text-xs text-[#64748B]">
                     หากหน้างานมีเครื่องปรับอากาศที่ยังไม่อยู่ในทะเบียน กรอกข้อมูลด้านล่าง ระบบจะบันทึกงานล้างและเพิ่มเข้าทะเบียนต่อท้ายของอาคาร{' '}
-                    <span className="font-medium text-[#1E293B]">{activeBuilding || '-'}</span>
+                    <span className="font-medium text-[#1E293B]">
+                      {formatReportBuildingName(activeBuilding) || '-'}
+                    </span>
                   </p>
                 </div>
                 <button
@@ -890,7 +895,7 @@ export const DailyEntryView: React.FC<DailyEntryViewProps> = ({
                         )}
                       </div>
                       <div className="text-xs text-[#64748B]">
-                        {item.building} · {item.floor} · {item.room} ·{' '}
+                        {formatReportBuildingName(item.building)} · {item.floor} · {item.room} ·{' '}
                         {item.acType === 'vrf' ? 'VRF/VRV' : 'ปกติ'}
                       </div>
                     </div>

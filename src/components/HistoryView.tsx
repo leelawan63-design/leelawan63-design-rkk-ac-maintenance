@@ -9,7 +9,7 @@ import type {
 } from '../types';
 import { CLEANING_STATUS_LABELS } from '../types';
 import type { TechnicianOption } from '../lib/api';
-import { computeTechnicianStats } from '../lib/reportCalc';
+import { computeTechnicianStats, formatReportBuildingName } from '../lib/reportCalc';
 import { exportAllReportsToSingleExcel } from '../lib/excelExport';
 import { useDeviceMode } from '../lib/deviceMode';
 import { formatThaiDate, formatThaiMonthYear, getMonthDateRange, getTodayIso } from '../lib/thaiDate';
@@ -261,7 +261,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
               <option value="all">ทุกอาคาร</option>
               {buildings.map((b) => (
                 <option key={b} value={b}>
-                  {b}
+                  {formatReportBuildingName(b)}
                 </option>
               ))}
             </select>
@@ -383,7 +383,8 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                       </div>
                       <div className="text-sm font-medium text-[#1E293B] mt-0.5">{log.room}</div>
                       <div className="text-xs text-[#64748B]">
-                        {log.building} · {log.floor} · {log.acType === 'vrf' ? 'VRF / VRV' : 'แอร์ปกติ'}
+                        {formatReportBuildingName(log.building)} · {log.floor} ·{' '}
+                        {log.acType === 'vrf' ? 'VRF / VRV' : 'แอร์ปกติ'}
                       </div>
                     </div>
                     <div className="text-right shrink-0">
@@ -478,7 +479,9 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                           {formatThaiDate(log.date, true)}
                         </td>
                         <td className="py-3 px-4">
-                          <div className="font-medium text-[#1E293B]">{log.building}</div>
+                          <div className="font-medium text-[#1E293B]">
+                            {formatReportBuildingName(log.building)}
+                          </div>
                           <div className="text-xs text-[#64748B]">{log.floor}</div>
                         </td>
                         <td className="py-3 px-4 text-[#334155]">{log.room}</td>
@@ -672,7 +675,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
             <p className="text-sm text-[#475569]">
               คุณต้องการลบประวัติของเครื่อง{' '}
               <span className="font-mono-tabular font-semibold">{deletingLog.unitCode}</span> (
-              {deletingLog.building} · {deletingLog.room}) วันที่{' '}
+              {formatReportBuildingName(deletingLog.building)} · {deletingLog.room}) วันที่{' '}
               {formatThaiDate(deletingLog.date, true)} ใช่หรือไม่? การดำเนินการนี้ไม่สามารถย้อนกลับได้
             </p>
             {errorMsg && (
