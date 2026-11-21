@@ -5,6 +5,7 @@ import { CLEANING_STATUS_LABELS } from '../types';
 import {
   computeBuildingFloorInventory,
   computeContractCounts,
+  computeMajorCycleSummary,
   computeMonthlyCleaningMatrix,
   computeTechnicianStats,
   computeUncleanedSummary,
@@ -12,6 +13,8 @@ import {
   formatReportNotes,
   formatReportTechnicianFirstName,
   formatReportTechnicianName,
+  getCleaningCycleTypeLabel,
+  getMajorCleaningCycle,
   groupUncleanedItemsByBuildingFloor,
 } from '../lib/reportCalc';
 import {
@@ -101,6 +104,8 @@ export const ReportsPrintView: React.FC<ReportsPrintViewProps> = ({
   const [inspectorName, setInspectorName] = useState('');
   const [printOrientation, setPrintOrientation] = useState<'portrait' | 'landscape'>('portrait');
   const [showBuildingBreakdown, setShowBuildingBreakdown] = useState(true);
+  const [combineMajorCycle, setCombineMajorCycle] = useState(false);
+  const [showMajorSummaryTable, setShowMajorSummaryTable] = useState(true);
   const [showMonthlySection1, setShowMonthlySection1] = useState(true);
   const [showMonthlySection2, setShowMonthlySection2] = useState(true);
   const [showMonthlySection3, setShowMonthlySection3] = useState(true);
@@ -138,6 +143,8 @@ export const ReportsPrintView: React.FC<ReportsPrintViewProps> = ({
     rangeEnd,
     printOrientation,
     showBuildingBreakdown,
+    combineMajorCycle,
+    showMajorSummaryTable,
     showMonthlySection1,
     showMonthlySection2,
     showMonthlySection3,
@@ -146,6 +153,18 @@ export const ReportsPrintView: React.FC<ReportsPrintViewProps> = ({
     senderName,
     inspectorName,
   ]);
+
+  const isMonthBasedReport =
+    activeReport === 'monthly' ||
+    activeReport === 'monthly_cleaned' ||
+    activeReport === 'uncleaned_filtered';
+
+  const majorCycle = useMemo(() => getMajorCleaningCycle(selectedMonth), [selectedMonth]);
+  const cleaningTypeLabel = useMemo(
+    () => getCleaningCycleTypeLabel(selectedMonth),
+    [selectedMonth]
+  );
+  const isCombinedMajor = Boolean(majorCycle && combineMajorCycle && isMonthBasedReport);
 
   const contract = useMemo(() => computeContractCounts(units), [units]);
   const floorInv = useMemo(() => computeBuildingFloorInventory(units), [units]);
@@ -163,10 +182,30 @@ export const ReportsPrintView: React.FC<ReportsPrintViewProps> = ({
     [logs, units, selectedYear, selectedMonth]
   );
 
+  const majorSummary = useMemo(
+    () =>
+      isCombinedMajor && majorCycle
+        ? computeMajorCycleSummary(logs, units, selectedYear, majorCycle.months)
+        : null,
+    [isCombinedMajor, majorCycle, logs, units, selectedYear]
+  );
+
+  const activeUncleaned = useMemo(
+    () => (majorSummary ? majorSummary.uncleanedSummary : uncleaned),
+    [majorSummary, uncleaned]
+  );
+
   const monthPrefix = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}`;
+  const activeMonthPrefixes = useMemo(() => {
+    if (isCombinedMajor && majorCycle) {
+      return majorCycle.months.map((m) => `${selectedYear}-${String(m).padStart(2, '0')}`);
+    }
+    return [monthPrefix];
+  }, [isCombinedMajor, majorCycle, selectedYear, monthPrefix]);
+
   const monthLogs = useMemo(
-    () => logs.filter((l) => l.date.startsWith(monthPrefix)),
-    [logs, monthPrefix]
+    () => logs.filter((l) => activeMonthPrefixes.includes(l.date.slice(0, 7))),
+    [logs, activeMonthPrefixes]
   );
   const monthTechStats = useMemo(
     () => computeTechnicianStats(monthLogs, units),
@@ -174,14 +213,14 @@ export const ReportsPrintView: React.FC<ReportsPrintViewProps> = ({
   );
 
   const monthlyUncleanedItems = useMemo(() => {
-    return uncleaned.allItems.filter((item) => {
+    return activeUncleaned.allItems.filter((item) => {
       if (uncleanedCategory !== 'all' && item.status !== uncleanedCategory) return false;
       if (activeReport === 'uncleaned_filtered' && selectedBuilding !== 'all' && item.building !== selectedBuilding) {
         return false;
       }
       return true;
     });
-  }, [uncleaned.allItems, uncleanedCategory, activeReport, selectedBuilding]);
+  }, [activeUncleaned.allItems, uncleanedCategory, activeReport, selectedBuilding]);
 
   const groupedMonthlyUncleaned = useMemo(
     () => groupUncleanedItemsByBuildingFloor(monthlyUncleanedItems),
@@ -191,7 +230,7 @@ export const ReportsPrintView: React.FC<ReportsPrintViewProps> = ({
   const monthlyCleanedLogs = useMemo(() => {
     return logs
       .filter((l) => {
-        if (!l.date.startsWith(monthPrefix)) return false;
+        if (!activeMonthPrefixes.includes(l.date.slice(0, 7))) return false;
         if (l.status !== 'cleaned') return false;
         if (cancelledIds.has(l.unitId)) return false;
         if (selectedBuilding !== 'all' && l.building !== selectedBuilding) return false;
@@ -211,7 +250,7 @@ export const ReportsPrintView: React.FC<ReportsPrintViewProps> = ({
         if (dCmp !== 0) return dCmp;
         return a.unitCode.localeCompare(b.unitCode, 'th', { numeric: true });
       });
-  }, [logs, monthPrefix, cancelledIds, selectedBuilding, selectedAcType]);
+  }, [logs, activeMonthPrefixes, cancelledIds, selectedBuilding, selectedAcType]);
 
   const activeUnitCountsByBuilding = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -542,6 +581,7 @@ export const ReportsPrintView: React.FC<ReportsPrintViewProps> = ({
       dailyDate,
       startDate: rangeStart,
       endDate: rangeEnd,
+      combineMajorCycle: isCombinedMajor,
     });
   };
 
@@ -611,11 +651,6 @@ export const ReportsPrintView: React.FC<ReportsPrintViewProps> = ({
       </div>
     </div>
   );
-
-  const isMonthBasedReport =
-    activeReport === 'monthly' ||
-    activeReport === 'monthly_cleaned' ||
-    activeReport === 'uncleaned_filtered';
 
   const sheetPreviewMaxWidth =
     printOrientation === 'landscape' ? 'max-w-[297mm]' : 'max-w-[210mm]';
@@ -754,6 +789,36 @@ export const ReportsPrintView: React.FC<ReportsPrintViewProps> = ({
                     </option>
                   ))}
                 </select>
+              </div>
+              <div className="space-y-1">
+                <label className="block text-xs text-[#64748B]">
+                  รอบการล้าง (ล้างใหญ่ / ล้างย่อย)
+                </label>
+                {majorCycle ? (
+                  <select
+                    aria-label="รูปแบบรอบการล้างใหญ่"
+                    value={combineMajorCycle ? 'combined' : 'single'}
+                    onChange={(e) => {
+                      const nextCombined = e.target.value === 'combined';
+                      setCombineMajorCycle(nextCombined);
+                      if (nextCombined) {
+                        setShowMajorSummaryTable(true);
+                      }
+                    }}
+                    className="w-full h-9 px-3 rounded-lg border border-[#4A7C9B]/60 bg-[#F4F8FB] text-sm font-medium text-[#1E3A5F]"
+                  >
+                    <option value="single">
+                      การล้างใหญ่ — แยกเดือน{THAI_MONTHS[selectedMonth - 1]}
+                    </option>
+                    <option value="combined">
+                      การล้างใหญ่ — รวม 2 เดือน ({majorCycle.label})
+                    </option>
+                  </select>
+                ) : (
+                  <div className="w-full h-9 px-3 rounded-lg border border-[#DCE4EE] bg-[#F8FAFC] text-sm text-[#475569] flex items-center">
+                    การล้างย่อย (เดือน{THAI_MONTHS[selectedMonth - 1]})
+                  </div>
+                )}
               </div>
             </>
           )}
@@ -978,15 +1043,40 @@ export const ReportsPrintView: React.FC<ReportsPrintViewProps> = ({
                 เลือกหัวข้อที่ต้องการแสดงและพิมพ์ (เฉพาะรายงานที่ 1)
               </span>
               <div className="flex flex-wrap gap-1.5">
+                {isCombinedMajor && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowMajorSummaryTable(true);
+                      setShowMonthlySection1(false);
+                      setShowMonthlySection2(false);
+                      setShowMonthlySection3(false);
+                      setShowMonthlyTechSummary(false);
+                    }}
+                    className={`px-2.5 py-1 rounded-md text-xs border transition-colors cursor-pointer ${
+                      showMajorSummaryTable &&
+                      !showMonthlySection1 &&
+                      !showMonthlySection2 &&
+                      !showMonthlySection3 &&
+                      !showMonthlyTechSummary
+                        ? 'bg-[#2F6A4E] text-white border-[#2F6A4E]'
+                        : 'bg-[#ECF6F1] text-[#25593E] border-[#C6E2D2] hover:bg-[#DCEEE4]'
+                    }`}
+                  >
+                    เฉพาะตารางสรุปล้างใหญ่ (รวม 2 เดือน)
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => {
+                    setShowMajorSummaryTable(true);
                     setShowMonthlySection1(true);
                     setShowMonthlySection2(true);
                     setShowMonthlySection3(true);
                     setShowMonthlyTechSummary(true);
                   }}
                   className={`px-2.5 py-1 rounded-md text-xs border transition-colors cursor-pointer ${
+                    (!isCombinedMajor || showMajorSummaryTable) &&
                     showMonthlySection1 &&
                     showMonthlySection2 &&
                     showMonthlySection3 &&
@@ -1000,12 +1090,14 @@ export const ReportsPrintView: React.FC<ReportsPrintViewProps> = ({
                 <button
                   type="button"
                   onClick={() => {
+                    setShowMajorSummaryTable(false);
                     setShowMonthlySection1(true);
                     setShowMonthlySection2(false);
                     setShowMonthlySection3(false);
                     setShowMonthlyTechSummary(false);
                   }}
                   className={`px-2.5 py-1 rounded-md text-xs border transition-colors cursor-pointer ${
+                    (!isCombinedMajor || !showMajorSummaryTable) &&
                     showMonthlySection1 &&
                     !showMonthlySection2 &&
                     !showMonthlySection3 &&
@@ -1019,12 +1111,14 @@ export const ReportsPrintView: React.FC<ReportsPrintViewProps> = ({
                 <button
                   type="button"
                   onClick={() => {
+                    setShowMajorSummaryTable(false);
                     setShowMonthlySection1(true);
                     setShowMonthlySection2(true);
                     setShowMonthlySection3(false);
                     setShowMonthlyTechSummary(false);
                   }}
                   className={`px-2.5 py-1 rounded-md text-xs border transition-colors cursor-pointer ${
+                    (!isCombinedMajor || !showMajorSummaryTable) &&
                     showMonthlySection1 &&
                     showMonthlySection2 &&
                     !showMonthlySection3 &&
@@ -1039,6 +1133,17 @@ export const ReportsPrintView: React.FC<ReportsPrintViewProps> = ({
             </div>
 
             <div className="flex flex-wrap gap-x-5 gap-y-2 text-xs text-[#334155]">
+              {isCombinedMajor && (
+                <label className="inline-flex items-center gap-2 cursor-pointer select-none font-medium text-[#25593E]">
+                  <input
+                    type="checkbox"
+                    checked={showMajorSummaryTable}
+                    onChange={(e) => setShowMajorSummaryTable(e.target.checked)}
+                    className="rounded border-[#CBD5E1] text-[#2F6A4E] focus:ring-[#2F6A4E]"
+                  />
+                  <span>ตารางสรุปล้างใหญ่ (รวม 2 เดือน)</span>
+                </label>
+              )}
               <label className="inline-flex items-center gap-2 cursor-pointer select-none">
                 <input
                   type="checkbox"
@@ -1101,12 +1206,19 @@ export const ReportsPrintView: React.FC<ReportsPrintViewProps> = ({
           <tbody className="print-shell-body">
             {/* REPORT 1: MONTHLY / ANNUAL SUMMARY */}
             {activeReport === 'monthly' && (() => {
+              const periodHeaderText =
+                isCombinedMajor && majorCycle
+                  ? `ประจำรอบการล้างใหญ่ ${majorCycle.label} ${selectedYear + 543} (การล้างใหญ่ · รวม 2 เดือน)`
+                  : `ประจำเดือน ${formatThaiMonthYear(selectedYear, selectedMonth)} (${cleaningTypeLabel})`;
+
               const section3Element = showMonthlySection3 ? (
                 <div className="space-y-1.5">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <h2 className="text-xs sm:text-sm font-bold text-[#0F172A]">
-                      3. บัญชีรายการเครื่องปรับอากาศที่ไม่ได้เข้าล้าง ประจำเดือน{' '}
-                      {formatThaiMonthYear(selectedYear, selectedMonth)}
+                      3. บัญชีรายการเครื่องปรับอากาศที่ไม่ได้เข้าล้าง{' '}
+                      {isCombinedMajor && majorCycle
+                        ? `ประจำรอบ ${majorCycle.label} ${selectedYear + 543} (การล้างใหญ่)`
+                        : `ประจำเดือน ${formatThaiMonthYear(selectedYear, selectedMonth)} (${cleaningTypeLabel})`}
                       {uncleanedCategory !== 'all' && ` (${UNCLEANED_FILTER_LABELS[uncleanedCategory]})`}
                     </h2>
                     <span className="text-[11px] text-[#64748B] tabular-nums">
@@ -1225,45 +1337,229 @@ export const ReportsPrintView: React.FC<ReportsPrintViewProps> = ({
               const shouldBreakBeforeSecondBlock =
                 showMonthlySection1 && showMonthlySection3 && groupedMonthlyUncleaned.length > 0;
 
+              const renderDailyMatrixTable = (
+                targetMatrix: typeof matrix,
+                monthCaption?: string
+              ) => (
+                <div className="space-y-1">
+                  {monthCaption && (
+                    <div className="text-[11px] font-semibold text-[#1E3A5F] bg-[#F4F8FB] border border-[#DCE7F0] rounded px-2.5 py-1 flex items-center justify-between">
+                      <span>{monthCaption}</span>
+                      <span className="tabular-nums text-[#25593E]">
+                        ล้างแล้ว {targetMatrix.grandTotal.toLocaleString()} เครื่อง (ปกติ{' '}
+                        {targetMatrix.grandNormalTotal.toLocaleString()} · VRF{' '}
+                        {targetMatrix.grandVrfTotal.toLocaleString()})
+                      </span>
+                    </div>
+                  )}
+                  {showBuildingBreakdown ? (
+                    <table className="w-full table-fixed text-[8px] sm:text-[9px] print:text-[8px] leading-tight border border-[#CBD5E1] border-collapse">
+                      <thead>
+                        <tr className="bg-[#EEF4F9] text-[#1E293B]">
+                          <th className="border border-[#CBD5E1] py-1 px-[2px] text-center w-[24px]">
+                            วันที่
+                          </th>
+                          {targetMatrix.buildings.map((b) => (
+                            <th
+                              key={b}
+                              className="border border-[#CBD5E1] py-1 px-[2px] text-center align-bottom break-words leading-[1.1]"
+                            >
+                              {formatReportBuildingName(b)}
+                            </th>
+                          ))}
+                          <th className="border border-[#CBD5E1] py-1 px-[2px] text-center font-bold bg-[#E2ECF5] w-[32px]">
+                            รวม/วัน
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {targetMatrix.rows.map((r) => (
+                          <tr
+                            key={r.day}
+                            className={r.dayTotal > 0 ? 'bg-white' : 'bg-[#FAFBFD] text-[#94A3B8]'}
+                          >
+                            <td className="border border-[#CBD5E1] py-[3px] px-0.5 text-center tabular-nums font-medium">
+                              {r.day}
+                            </td>
+                            {targetMatrix.buildings.map((b) => {
+                              const val = r.countsByBuilding[b] || 0;
+                              return (
+                                <td
+                                  key={b}
+                                  className={`border border-[#CBD5E1] py-[3px] px-0.5 text-center tabular-nums ${
+                                    val > 0 ? 'font-semibold text-[#0F172A]' : ''
+                                  }`}
+                                >
+                                  {val > 0 ? val : '-'}
+                                </td>
+                              );
+                            })}
+                            <td className="border border-[#CBD5E1] py-[3px] px-0.5 text-center tabular-nums font-semibold bg-[#F4F8FB] text-[#1E293B]">
+                              {r.dayTotal > 0 ? r.dayTotal : '-'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot>
+                        <tr className="bg-[#E6EFF7] font-bold text-[#0F172A]">
+                          <td className="border border-[#CBD5E1] py-1 px-0.5 text-center">รวม</td>
+                          {targetMatrix.buildings.map((b) => (
+                            <td
+                              key={b}
+                              className="border border-[#CBD5E1] py-1 px-0.5 text-center tabular-nums"
+                            >
+                              {targetMatrix.totalsByBuilding[b] || 0}
+                            </td>
+                          ))}
+                          <td className="border border-[#CBD5E1] py-1 px-0.5 text-center tabular-nums text-[#25593E]">
+                            {targetMatrix.grandTotal}
+                          </td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  ) : (
+                    <table className="w-full table-fixed text-[10px] leading-tight border border-[#CBD5E1] border-collapse">
+                      <thead>
+                        <tr className="bg-[#EEF4F9] text-[#1E293B]">
+                          <th className="border border-[#CBD5E1] py-1 px-2 text-center w-[12%]">
+                            วันที่
+                          </th>
+                          <th className="border border-[#CBD5E1] py-1 px-2 text-left w-[28%]">
+                            วัน / เดือน / ปี
+                          </th>
+                          <th className="border border-[#CBD5E1] py-1 px-2 text-right w-[20%]">
+                            แอร์ปกติ (เครื่อง)
+                          </th>
+                          <th className="border border-[#CBD5E1] py-1 px-2 text-right w-[20%]">
+                            VRF / VRV (เครื่อง)
+                          </th>
+                          <th className="border border-[#CBD5E1] py-1 px-2 text-right font-bold bg-[#E2ECF5] w-[20%]">
+                            รวมล้างแล้ว (เครื่อง)
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {targetMatrix.rows.map((r) => (
+                          <tr
+                            key={r.day}
+                            className={r.dayTotal > 0 ? 'bg-white' : 'bg-[#FAFBFD] text-[#94A3B8]'}
+                          >
+                            <td className="border border-[#CBD5E1] py-[3px] px-2 text-center tabular-nums font-medium">
+                              {r.day}
+                            </td>
+                            <td className="border border-[#CBD5E1] py-[3px] px-2 tabular-nums">
+                              {formatThaiDate(r.dateStr, true)}
+                            </td>
+                            <td className="border border-[#CBD5E1] py-[3px] px-2 text-right tabular-nums">
+                              {r.normalTotal > 0 ? r.normalTotal : '-'}
+                            </td>
+                            <td className="border border-[#CBD5E1] py-[3px] px-2 text-right tabular-nums">
+                              {r.vrfTotal > 0 ? r.vrfTotal : '-'}
+                            </td>
+                            <td
+                              className={`border border-[#CBD5E1] py-[3px] px-2 text-right tabular-nums bg-[#F4F8FB] ${
+                                r.dayTotal > 0 ? 'font-semibold text-[#0F172A]' : ''
+                              }`}
+                            >
+                              {r.dayTotal > 0 ? r.dayTotal : '-'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot>
+                        <tr className="bg-[#E6EFF7] font-bold text-[#0F172A]">
+                          <td colSpan={2} className="border border-[#CBD5E1] py-1 px-2 text-center">
+                            รวมทั้งเดือน
+                          </td>
+                          <td className="border border-[#CBD5E1] py-1 px-2 text-right tabular-nums">
+                            {targetMatrix.grandNormalTotal}
+                          </td>
+                          <td className="border border-[#CBD5E1] py-1 px-2 text-right tabular-nums">
+                            {targetMatrix.grandVrfTotal}
+                          </td>
+                          <td className="border border-[#CBD5E1] py-1 px-2 text-right tabular-nums text-[#25593E]">
+                            {targetMatrix.grandTotal}
+                          </td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  )}
+                </div>
+              );
+
               return (
                 <>
                   <tr>
                     <td className="print-shell-cell">
                       <div className="space-y-3.5">
                         {renderLetterhead(
-                          'รายงานสรุปผลการปรนนิบัติบำรุงรักษาเครื่องปรับอากาศ',
-                          `ประจำเดือน ${formatThaiMonthYear(selectedYear, selectedMonth)}`
+                          `รายงานสรุปผลการปรนนิบัติบำรุงรักษาเครื่องปรับอากาศ (${cleaningTypeLabel})`,
+                          periodHeaderText
                         )}
 
                         {/* Contract AC Count Box */}
-                        <div className="grid grid-cols-2 sm:grid-cols-4 print:grid-cols-4 gap-2.5 p-2.5 rounded-lg bg-[#F8FAFC] border border-[#CBD5E1]">
-                          <div>
-                            <div className="text-[11px] text-[#64748B]">จำนวนแอร์ทั้งหมดในสัญญา</div>
-                            <div className="text-base font-bold text-[#0F172A] tabular-nums">
-                              {contract.totalActive} เครื่อง
+                        {isCombinedMajor && majorSummary && majorCycle ? (
+                          <div className="grid grid-cols-2 sm:grid-cols-4 print:grid-cols-4 gap-2.5 p-2.5 rounded-lg bg-[#F8FAFC] border border-[#CBD5E1]">
+                            <div>
+                              <div className="text-[11px] text-[#64748B]">จำนวนแอร์ทั้งหมดในสัญญา</div>
+                              <div className="text-base font-bold text-[#0F172A] tabular-nums">
+                                {contract.totalActive} เครื่อง
+                              </div>
+                            </div>
+                            <div>
+                              <div className="text-[11px] text-[#64748B]">
+                                ล้างได้รวม ({majorCycle.shortLabel})
+                              </div>
+                              <div className="text-base font-bold text-[#25593E] tabular-nums">
+                                {majorSummary.totalCleaned} เครื่อง
+                              </div>
+                            </div>
+                            <div>
+                              <div className="text-[11px] text-[#64748B]">ไม่ได้เข้าล้าง (ตามบันทึก)</div>
+                              <div className="text-base font-bold text-[#8C5E26] tabular-nums">
+                                {majorSummary.uncleanedSummary.totalUncleaned} เครื่อง
+                              </div>
+                            </div>
+                            <div>
+                              <div className="text-[11px] text-[#64748B]">
+                                คงเหลือไม่ได้ล้าง (จากสัญญา)
+                              </div>
+                              <div className="text-base font-bold text-[#7A4E1A] tabular-nums">
+                                {majorSummary.contractRemainingUncleaned} เครื่อง
+                              </div>
                             </div>
                           </div>
-                          <div>
-                            <div className="text-[11px] text-[#64748B]">แอร์ปกติ</div>
-                            <div className="text-base font-bold text-[#1E3A5F] tabular-nums">
-                              {contract.normalActive} เครื่อง
+                        ) : (
+                          <div className="grid grid-cols-2 sm:grid-cols-4 print:grid-cols-4 gap-2.5 p-2.5 rounded-lg bg-[#F8FAFC] border border-[#CBD5E1]">
+                            <div>
+                              <div className="text-[11px] text-[#64748B]">จำนวนแอร์ทั้งหมดในสัญญา</div>
+                              <div className="text-base font-bold text-[#0F172A] tabular-nums">
+                                {contract.totalActive} เครื่อง
+                              </div>
+                            </div>
+                            <div>
+                              <div className="text-[11px] text-[#64748B]">แอร์ปกติ</div>
+                              <div className="text-base font-bold text-[#1E3A5F] tabular-nums">
+                                {contract.normalActive} เครื่อง
+                              </div>
+                            </div>
+                            <div>
+                              <div className="text-[11px] text-[#64748B]">ระบบ VRF / VRV</div>
+                              <div className="text-base font-bold text-[#25593E] tabular-nums">
+                                {contract.vrfActive} เครื่อง
+                              </div>
+                            </div>
+                            <div>
+                              <div className="text-[11px] text-[#64748B]">เครื่องที่ไม่ได้เข้าล้าง</div>
+                              <div className="text-base font-bold text-[#8C5E26] tabular-nums">
+                                {activeUncleaned.totalUncleaned} เครื่อง
+                              </div>
                             </div>
                           </div>
-                          <div>
-                            <div className="text-[11px] text-[#64748B]">ระบบ VRF / VRV</div>
-                            <div className="text-base font-bold text-[#25593E] tabular-nums">
-                              {contract.vrfActive} เครื่อง
-                            </div>
-                          </div>
-                          <div>
-                            <div className="text-[11px] text-[#64748B]">เครื่องที่ไม่ได้เข้าล้าง</div>
-                            <div className="text-base font-bold text-[#8C5E26] tabular-nums">
-                              {uncleaned.totalUncleaned} เครื่อง
-                            </div>
-                          </div>
-                        </div>
+                        )}
 
-                        {!showMonthlySection1 &&
+                        {(!isCombinedMajor || !showMajorSummaryTable) &&
+                          !showMonthlySection1 &&
                           !showMonthlySection2 &&
                           !showMonthlySection3 &&
                           !showMonthlyTechSummary && (
@@ -1272,145 +1568,150 @@ export const ReportsPrintView: React.FC<ReportsPrintViewProps> = ({
                             </div>
                           )}
 
+                        {/* Major Cleaning Combined 2-Month Executive Summary Table */}
+                        {isCombinedMajor && majorSummary && majorCycle && showMajorSummaryTable && (
+                          <div className="space-y-1.5 print-break-inside-avoid">
+                            <h2 className="text-xs sm:text-sm font-bold text-[#0F172A]">
+                              สรุปผลการล้างใหญ่ประจำรอบ ({majorCycle.label} พ.ศ. {selectedYear + 543})
+                            </h2>
+                            <table className="w-full table-fixed text-[10.5px] leading-snug border border-[#CBD5E1] border-collapse">
+                              <thead>
+                                <tr className="bg-[#EEF4F9] text-[#1E293B]">
+                                  <th className="border border-[#CBD5E1] py-1.5 px-2 text-center w-[8%]">
+                                    ลำดับ
+                                  </th>
+                                  <th className="border border-[#CBD5E1] py-1.5 px-2.5 text-left w-[40%]">
+                                    รายการสรุปล้างใหญ่
+                                  </th>
+                                  <th className="border border-[#CBD5E1] py-1.5 px-2.5 text-left w-[34%]">
+                                    รายละเอียด
+                                  </th>
+                                  <th className="border border-[#CBD5E1] py-1.5 px-2.5 text-right w-[18%]">
+                                    จำนวน (เครื่อง)
+                                  </th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                <tr>
+                                  <td className="border border-[#CBD5E1] py-1.5 px-2 text-center tabular-nums">
+                                    1
+                                  </td>
+                                  <td className="border border-[#CBD5E1] py-1.5 px-2.5 font-medium">
+                                    เดือน{majorSummary.month1.monthName} {selectedYear + 543} (จำนวนที่ล้างได้)
+                                  </td>
+                                  <td className="border border-[#CBD5E1] py-1.5 px-2.5 text-[#475569] tabular-nums">
+                                    แอร์ปกติ {majorSummary.month1.normalCount} เครื่อง · VRF / VRV{' '}
+                                    {majorSummary.month1.vrfCount} เครื่อง
+                                  </td>
+                                  <td className="border border-[#CBD5E1] py-1.5 px-2.5 text-right tabular-nums font-semibold text-[#1E293B]">
+                                    {majorSummary.month1.cleanedCount} เครื่อง
+                                  </td>
+                                </tr>
+                                <tr>
+                                  <td className="border border-[#CBD5E1] py-1.5 px-2 text-center tabular-nums">
+                                    2
+                                  </td>
+                                  <td className="border border-[#CBD5E1] py-1.5 px-2.5 font-medium">
+                                    เดือน{majorSummary.month2.monthName} {selectedYear + 543} (จำนวนที่ล้างได้)
+                                  </td>
+                                  <td className="border border-[#CBD5E1] py-1.5 px-2.5 text-[#475569] tabular-nums">
+                                    แอร์ปกติ {majorSummary.month2.normalCount} เครื่อง · VRF / VRV{' '}
+                                    {majorSummary.month2.vrfCount} เครื่อง
+                                  </td>
+                                  <td className="border border-[#CBD5E1] py-1.5 px-2.5 text-right tabular-nums font-semibold text-[#1E293B]">
+                                    {majorSummary.month2.cleanedCount} เครื่อง
+                                  </td>
+                                </tr>
+                                <tr className="bg-[#ECF6F1] font-bold text-[#25593E]">
+                                  <td className="border border-[#CBD5E1] py-1.5 px-2 text-center">-</td>
+                                  <td className="border border-[#CBD5E1] py-1.5 px-2.5">
+                                    รวมจำนวนเครื่องที่ล้างได้ทั้งหมด (รวม 2 เดือน)
+                                  </td>
+                                  <td className="border border-[#CBD5E1] py-1.5 px-2.5 font-normal text-[#25593E] tabular-nums">
+                                    แอร์ปกติ {majorSummary.totalNormalCleaned} เครื่อง · VRF / VRV{' '}
+                                    {majorSummary.totalVrfCleaned} เครื่อง
+                                  </td>
+                                  <td className="border border-[#CBD5E1] py-1.5 px-2.5 text-right tabular-nums">
+                                    {majorSummary.totalCleaned} เครื่อง
+                                  </td>
+                                </tr>
+                                <tr className="bg-[#FDF8F1] font-semibold text-[#7A4E1A]">
+                                  <td className="border border-[#CBD5E1] py-1.5 px-2 text-center">-</td>
+                                  <td className="border border-[#CBD5E1] py-1.5 px-2.5">
+                                    จำนวนเครื่องที่ไม่ได้เข้าล้าง (สรุปรวม)
+                                  </td>
+                                  <td className="border border-[#CBD5E1] py-1.5 px-2.5 font-normal text-[#8C5E26] tabular-nums">
+                                    คนไข้ {majorSummary.uncleanedSummary.patientOccupied.count} ·
+                                    ปิดปรับปรุง {majorSummary.uncleanedSummary.renovation.count} ·
+                                    ไม่มีการ์ด {majorSummary.uncleanedSummary.noCard.count}
+                                    {majorSummary.contractRemainingUncleaned !==
+                                      majorSummary.uncleanedSummary.totalUncleaned &&
+                                      ` (เทียบยอดคงเหลือจากสัญญา ${majorSummary.contractRemainingUncleaned} เครื่อง)`}
+                                  </td>
+                                  <td className="border border-[#CBD5E1] py-1.5 px-2.5 text-right tabular-nums">
+                                    {majorSummary.uncleanedSummary.totalUncleaned} เครื่อง
+                                  </td>
+                                </tr>
+                                <tr className="bg-[#F1F5F9] font-bold text-[#0F172A]">
+                                  <td className="border border-[#CBD5E1] py-1.5 px-2 text-center">-</td>
+                                  <td className="border border-[#CBD5E1] py-1.5 px-2.5">
+                                    ยอดเครื่องปรับอากาศทั้งหมดในสัญญา
+                                  </td>
+                                  <td className="border border-[#CBD5E1] py-1.5 px-2.5 font-normal text-[#475569] tabular-nums">
+                                    คิดเป็นผลงานการล้าง{' '}
+                                    {majorSummary.totalActiveUnits > 0
+                                      ? Math.round(
+                                          (majorSummary.totalCleaned /
+                                            majorSummary.totalActiveUnits) *
+                                            100
+                                        )
+                                      : 0}
+                                    % ของสัญญาทั้งหมด
+                                  </td>
+                                  <td className="border border-[#CBD5E1] py-1.5 px-2.5 text-right tabular-nums">
+                                    {majorSummary.totalActiveUnits} เครื่อง
+                                  </td>
+                                </tr>
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+
                         {/* 1. Daily x Building Table */}
                         {showMonthlySection1 && (
-                          <div className="space-y-1.5">
+                          <div className="space-y-2">
                             <h2 className="text-xs sm:text-sm font-bold text-[#0F172A]">
-                              1. ตารางสรุปจำนวนเครื่องปรับอากาศที่ล้างรายวันและยอดรวมทั้งเดือน (
-                              {showBuildingBreakdown ? 'แยกตามอาคาร' : 'รวมทุกอาคาร'})
+                              1. ตารางสรุปจำนวนเครื่องปรับอากาศที่ล้างรายวันและยอดรวม
+                              {isCombinedMajor && majorCycle
+                                ? `รอบ ${majorCycle.label}`
+                                : 'ทั้งเดือน'}{' '}
+                              ({showBuildingBreakdown ? 'แยกตามอาคาร' : 'รวมทุกอาคาร'})
                             </h2>
-                            <div className="w-full">
-                              {showBuildingBreakdown ? (
-                                <table className="w-full table-fixed text-[8px] sm:text-[9px] print:text-[8px] leading-tight border border-[#CBD5E1] border-collapse">
-                                  <thead>
-                                    <tr className="bg-[#EEF4F9] text-[#1E293B]">
-                                      <th className="border border-[#CBD5E1] py-1 px-[2px] text-center w-[24px]">
-                                        วันที่
-                                      </th>
-                                      {matrix.buildings.map((b) => (
-                                        <th
-                                          key={b}
-                                          className="border border-[#CBD5E1] py-1 px-[2px] text-center align-bottom break-words leading-[1.1]"
-                                        >
-                                          {formatReportBuildingName(b)}
-                                        </th>
-                                      ))}
-                                      <th className="border border-[#CBD5E1] py-1 px-[2px] text-center font-bold bg-[#E2ECF5] w-[32px]">
-                                        รวม/วัน
-                                      </th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {matrix.rows.map((r) => (
-                                      <tr
-                                        key={r.day}
-                                        className={r.dayTotal > 0 ? 'bg-white' : 'bg-[#FAFBFD] text-[#94A3B8]'}
-                                      >
-                                        <td className="border border-[#CBD5E1] py-[3px] px-0.5 text-center tabular-nums font-medium">
-                                          {r.day}
-                                        </td>
-                                        {matrix.buildings.map((b) => {
-                                          const val = r.countsByBuilding[b] || 0;
-                                          return (
-                                            <td
-                                              key={b}
-                                              className={`border border-[#CBD5E1] py-[3px] px-0.5 text-center tabular-nums ${
-                                                val > 0 ? 'font-semibold text-[#0F172A]' : ''
-                                              }`}
-                                            >
-                                              {val > 0 ? val : '-'}
-                                            </td>
-                                          );
-                                        })}
-                                        <td className="border border-[#CBD5E1] py-[3px] px-0.5 text-center tabular-nums font-semibold bg-[#F4F8FB] text-[#1E293B]">
-                                          {r.dayTotal > 0 ? r.dayTotal : '-'}
-                                        </td>
-                                      </tr>
-                                    ))}
-                                  </tbody>
-                                  <tfoot>
-                                    <tr className="bg-[#E6EFF7] font-bold text-[#0F172A]">
-                                      <td className="border border-[#CBD5E1] py-1 px-0.5 text-center">รวม</td>
-                                      {matrix.buildings.map((b) => (
-                                        <td
-                                          key={b}
-                                          className="border border-[#CBD5E1] py-1 px-0.5 text-center tabular-nums"
-                                        >
-                                          {matrix.totalsByBuilding[b] || 0}
-                                        </td>
-                                      ))}
-                                      <td className="border border-[#CBD5E1] py-1 px-0.5 text-center tabular-nums text-[#25593E]">
-                                        {matrix.grandTotal}
-                                      </td>
-                                    </tr>
-                                  </tfoot>
-                                </table>
+                            <div className="w-full space-y-3">
+                              {isCombinedMajor && majorSummary ? (
+                                <>
+                                  {renderDailyMatrixTable(
+                                    majorSummary.month1.matrix,
+                                    `เดือนที่ 1: ${majorSummary.month1.monthName} ${selectedYear + 543}`
+                                  )}
+                                  {renderDailyMatrixTable(
+                                    majorSummary.month2.matrix,
+                                    `เดือนที่ 2: ${majorSummary.month2.monthName} ${selectedYear + 543}`
+                                  )}
+                                  <div className="p-2 rounded bg-[#E6EFF7] border border-[#CBD5E1] text-[10.5px] font-bold text-[#0F172A] flex flex-wrap items-center justify-between gap-2 tabular-nums">
+                                    <span>
+                                      รวมยอดล้างได้ทั้ง 2 เดือน ({majorSummary.month1.monthName} +{' '}
+                                      {majorSummary.month2.monthName})
+                                    </span>
+                                    <span className="text-[#25593E]">
+                                      รวมทั้งสิ้น {majorSummary.totalCleaned} เครื่อง (แอร์ปกติ{' '}
+                                      {majorSummary.totalNormalCleaned} · VRF/VRV{' '}
+                                      {majorSummary.totalVrfCleaned})
+                                    </span>
+                                  </div>
+                                </>
                               ) : (
-                                <table className="w-full table-fixed text-[10px] leading-tight border border-[#CBD5E1] border-collapse">
-                                  <thead>
-                                    <tr className="bg-[#EEF4F9] text-[#1E293B]">
-                                      <th className="border border-[#CBD5E1] py-1 px-2 text-center w-[12%]">
-                                        วันที่
-                                      </th>
-                                      <th className="border border-[#CBD5E1] py-1 px-2 text-left w-[28%]">
-                                        วัน / เดือน / ปี
-                                      </th>
-                                      <th className="border border-[#CBD5E1] py-1 px-2 text-right w-[20%]">
-                                        แอร์ปกติ (เครื่อง)
-                                      </th>
-                                      <th className="border border-[#CBD5E1] py-1 px-2 text-right w-[20%]">
-                                        VRF / VRV (เครื่อง)
-                                      </th>
-                                      <th className="border border-[#CBD5E1] py-1 px-2 text-right font-bold bg-[#E2ECF5] w-[20%]">
-                                        รวมล้างแล้ว (เครื่อง)
-                                      </th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {matrix.rows.map((r) => (
-                                      <tr
-                                        key={r.day}
-                                        className={r.dayTotal > 0 ? 'bg-white' : 'bg-[#FAFBFD] text-[#94A3B8]'}
-                                      >
-                                        <td className="border border-[#CBD5E1] py-[3px] px-2 text-center tabular-nums font-medium">
-                                          {r.day}
-                                        </td>
-                                        <td className="border border-[#CBD5E1] py-[3px] px-2 tabular-nums">
-                                          {formatThaiDate(r.dateStr, true)}
-                                        </td>
-                                        <td className="border border-[#CBD5E1] py-[3px] px-2 text-right tabular-nums">
-                                          {r.normalTotal > 0 ? r.normalTotal : '-'}
-                                        </td>
-                                        <td className="border border-[#CBD5E1] py-[3px] px-2 text-right tabular-nums">
-                                          {r.vrfTotal > 0 ? r.vrfTotal : '-'}
-                                        </td>
-                                        <td
-                                          className={`border border-[#CBD5E1] py-[3px] px-2 text-right tabular-nums bg-[#F4F8FB] ${
-                                            r.dayTotal > 0 ? 'font-semibold text-[#0F172A]' : ''
-                                          }`}
-                                        >
-                                          {r.dayTotal > 0 ? r.dayTotal : '-'}
-                                        </td>
-                                      </tr>
-                                    ))}
-                                  </tbody>
-                                  <tfoot>
-                                    <tr className="bg-[#E6EFF7] font-bold text-[#0F172A]">
-                                      <td colSpan={2} className="border border-[#CBD5E1] py-1 px-2 text-center">
-                                        รวมทั้งเดือน
-                                      </td>
-                                      <td className="border border-[#CBD5E1] py-1 px-2 text-right tabular-nums">
-                                        {matrix.grandNormalTotal}
-                                      </td>
-                                      <td className="border border-[#CBD5E1] py-1 px-2 text-right tabular-nums">
-                                        {matrix.grandVrfTotal}
-                                      </td>
-                                      <td className="border border-[#CBD5E1] py-1 px-2 text-right tabular-nums text-[#25593E]">
-                                        {matrix.grandTotal}
-                                      </td>
-                                    </tr>
-                                  </tfoot>
-                                </table>
+                                renderDailyMatrixTable(matrix)
                               )}
                             </div>
                           </div>
@@ -1437,19 +1738,19 @@ export const ReportsPrintView: React.FC<ReportsPrintViewProps> = ({
                                 <tr>
                                   <td className="border border-[#CBD5E1] py-1 px-2.5 font-medium">2.1 ห้องมีคนไข้</td>
                                   <td className="border border-[#CBD5E1] py-1 px-2.5 text-right tabular-nums font-semibold">
-                                    {uncleaned.patientOccupied.count}
+                                    {activeUncleaned.patientOccupied.count}
                                   </td>
                                 </tr>
                                 <tr>
                                   <td className="border border-[#CBD5E1] py-1 px-2.5 font-medium">2.2 ปิดปรับปรุง</td>
                                   <td className="border border-[#CBD5E1] py-1 px-2.5 text-right tabular-nums font-semibold">
-                                    {uncleaned.renovation.count}
+                                    {activeUncleaned.renovation.count}
                                   </td>
                                 </tr>
                                 <tr>
                                   <td className="border border-[#CBD5E1] py-1 px-2.5 font-medium">2.3 ไม่มีการ์ด</td>
                                   <td className="border border-[#CBD5E1] py-1 px-2.5 text-right tabular-nums font-semibold">
-                                    {uncleaned.noCard.count}
+                                    {activeUncleaned.noCard.count}
                                   </td>
                                 </tr>
                                 <tr className="bg-[#F8FAFC] font-bold">
@@ -1457,7 +1758,7 @@ export const ReportsPrintView: React.FC<ReportsPrintViewProps> = ({
                                     รวมจำนวนทั้งหมดที่ไม่ได้เข้าล้าง (ไม่รวมเครื่องที่ยกเลิก {contract.cancelledCount} เครื่อง)
                                   </td>
                                   <td className="border border-[#CBD5E1] py-1 px-2.5 text-right tabular-nums text-[#7A4E1A]">
-                                    {uncleaned.totalUncleaned}
+                                    {activeUncleaned.totalUncleaned}
                                   </td>
                                 </tr>
                               </tbody>
@@ -1498,15 +1799,21 @@ export const ReportsPrintView: React.FC<ReportsPrintViewProps> = ({
                 <td className="print-shell-cell">
                   <div className="space-y-3.5">
             {renderLetterhead(
-              'บัญชีรายการเครื่องปรับอากาศที่เข้าล้างแล้ว (รายเดือน)',
-              `ประจำเดือน ${formatThaiMonthYear(selectedYear, selectedMonth)} · ${
+              `บัญชีรายการเครื่องปรับอากาศที่เข้าล้างแล้ว (${cleaningTypeLabel})`,
+              `${
+                isCombinedMajor && majorCycle
+                  ? `ประจำรอบ ${majorCycle.label} ${selectedYear + 543} (รวม 2 เดือน)`
+                  : `ประจำเดือน ${formatThaiMonthYear(selectedYear, selectedMonth)} (${cleaningTypeLabel})`
+              } · ${
                 selectedBuilding === 'all' ? 'ทุกอาคาร' : formatReportBuildingName(selectedBuilding)
               }`
             )}
 
             <div className="flex flex-wrap items-center justify-between gap-2 text-xs bg-[#F4FAF6] border border-[#CFE6D8] rounded-lg px-4 py-2">
               <span>
-                เข้าล้างแล้วทั้งหมดในเดือน{THAI_MONTHS[selectedMonth - 1]}:{' '}
+                {isCombinedMajor && majorCycle
+                  ? `เข้าล้างแล้วทั้งหมดในรอบ ${majorCycle.label}: `
+                  : `เข้าล้างแล้วทั้งหมดในเดือน${THAI_MONTHS[selectedMonth - 1]}: `}
                 <strong className="tabular-nums text-[#25593E]">
                   {monthlyCleanedLogs.length} เครื่อง
                 </strong>
@@ -1608,8 +1915,12 @@ export const ReportsPrintView: React.FC<ReportsPrintViewProps> = ({
                 <td className="print-shell-cell">
                   <div className="space-y-3.5">
             {renderLetterhead(
-              `บัญชีรายการเครื่องปรับอากาศที่ไม่ได้เข้าล้าง (${UNCLEANED_FILTER_LABELS[uncleanedCategory]})`,
-              `ประจำเดือน ${formatThaiMonthYear(selectedYear, selectedMonth)} · ${
+              `บัญชีรายการเครื่องปรับอากาศที่ไม่ได้เข้าล้าง (${UNCLEANED_FILTER_LABELS[uncleanedCategory]} · ${cleaningTypeLabel})`,
+              `${
+                isCombinedMajor && majorCycle
+                  ? `ประจำรอบ ${majorCycle.label} ${selectedYear + 543} (รวม 2 เดือน)`
+                  : `ประจำเดือน ${formatThaiMonthYear(selectedYear, selectedMonth)} (${cleaningTypeLabel})`
+              } · ${
                 selectedBuilding === 'all' ? 'ทุกอาคาร' : formatReportBuildingName(selectedBuilding)
               }`
             )}

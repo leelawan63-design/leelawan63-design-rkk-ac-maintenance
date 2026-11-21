@@ -1,5 +1,40 @@
 import type { ACUnit, CleaningLog, TechnicianStat } from '../types';
-import { getDaysInMonth } from './thaiDate';
+import { THAI_MONTHS, getDaysInMonth } from './thaiDate';
+
+export interface MajorCleaningCycle {
+  id: 'feb_mar' | 'aug_sep';
+  months: [number, number];
+  label: string;
+  shortLabel: string;
+}
+
+export function getMajorCleaningCycle(month1To12: number): MajorCleaningCycle | null {
+  if (month1To12 === 2 || month1To12 === 3) {
+    return {
+      id: 'feb_mar',
+      months: [2, 3],
+      label: 'กุมภาพันธ์ – มีนาคม',
+      shortLabel: 'ก.พ. – มี.ค.',
+    };
+  }
+  if (month1To12 === 8 || month1To12 === 9) {
+    return {
+      id: 'aug_sep',
+      months: [8, 9],
+      label: 'สิงหาคม – กันยายน',
+      shortLabel: 'ส.ค. – ก.ย.',
+    };
+  }
+  return null;
+}
+
+export function isMajorCleaningMonth(month1To12: number): boolean {
+  return getMajorCleaningCycle(month1To12) !== null;
+}
+
+export function getCleaningCycleTypeLabel(month1To12: number): 'การล้างใหญ่' | 'การล้างย่อย' {
+  return isMajorCleaningMonth(month1To12) ? 'การล้างใหญ่' : 'การล้างย่อย';
+}
 
 export function formatReportTechnicianName(
   technicianId?: string,
@@ -368,19 +403,21 @@ export function groupUncleanedItemsByBuildingFloor(
     });
 }
 
-export function computeUncleanedSummary(
+export function computeUncleanedSummaryForMonths(
   logs: CleaningLog[],
   units: ACUnit[],
   year: number,
-  month1To12: number
+  months: number[]
 ): UncleanedCategorySummary {
   const cancelledIds = new Set(units.filter((u) => u.status === 'cancelled').map((u) => u.id));
-  const prefix = `${year}-${String(month1To12).padStart(2, '0')}`;
+  const prefixes = new Set(
+    months.map((m) => `${year}-${String(m).padStart(2, '0')}`)
+  );
 
   const uncleanedLogs = logs
     .filter(
       (l) =>
-        l.date.startsWith(prefix) &&
+        prefixes.has(l.date.slice(0, 7)) &&
         l.status !== 'cleaned' &&
         !cancelledIds.has(l.unitId)
     )
@@ -416,6 +453,92 @@ export function computeUncleanedSummary(
     },
     totalUncleaned: uncleanedLogs.length,
     allItems: uncleanedLogs,
+  };
+}
+
+export function computeUncleanedSummary(
+  logs: CleaningLog[],
+  units: ACUnit[],
+  year: number,
+  month1To12: number
+): UncleanedCategorySummary {
+  return computeUncleanedSummaryForMonths(logs, units, year, [month1To12]);
+}
+
+export interface MajorCycleMonthBreakdown {
+  month: number;
+  monthName: string;
+  cleanedCount: number;
+  normalCount: number;
+  vrfCount: number;
+  uncleanedCount: number;
+  matrix: ReturnType<typeof computeMonthlyCleaningMatrix>;
+}
+
+export interface MajorCycleSummary {
+  month1: MajorCycleMonthBreakdown;
+  month2: MajorCycleMonthBreakdown;
+  totalCleaned: number;
+  totalNormalCleaned: number;
+  totalVrfCleaned: number;
+  totalActiveUnits: number;
+  uncleanedSummary: UncleanedCategorySummary;
+  contractRemainingUncleaned: number;
+  buildings: string[];
+  buildingTotals: Record<string, number>;
+}
+
+export function computeMajorCycleSummary(
+  logs: CleaningLog[],
+  units: ACUnit[],
+  year: number,
+  months: [number, number]
+): MajorCycleSummary {
+  const [m1, m2] = months;
+  const matrix1 = computeMonthlyCleaningMatrix(logs, units, year, m1);
+  const matrix2 = computeMonthlyCleaningMatrix(logs, units, year, m2);
+  const uncleaned1 = computeUncleanedSummary(logs, units, year, m1);
+  const uncleaned2 = computeUncleanedSummary(logs, units, year, m2);
+  const uncleanedSummary = computeUncleanedSummaryForMonths(logs, units, year, [m1, m2]);
+  const contract = computeContractCounts(units);
+
+  const totalCleaned = matrix1.grandTotal + matrix2.grandTotal;
+  const buildings = Array.from(
+    new Set([...matrix1.buildings, ...matrix2.buildings])
+  ).sort((a, b) => a.localeCompare(b, 'th'));
+
+  const buildingTotals: Record<string, number> = {};
+  for (const b of buildings) {
+    buildingTotals[b] = (matrix1.totalsByBuilding[b] || 0) + (matrix2.totalsByBuilding[b] || 0);
+  }
+
+  return {
+    month1: {
+      month: m1,
+      monthName: THAI_MONTHS[m1 - 1] || String(m1),
+      cleanedCount: matrix1.grandTotal,
+      normalCount: matrix1.grandNormalTotal,
+      vrfCount: matrix1.grandVrfTotal,
+      uncleanedCount: uncleaned1.totalUncleaned,
+      matrix: matrix1,
+    },
+    month2: {
+      month: m2,
+      monthName: THAI_MONTHS[m2 - 1] || String(m2),
+      cleanedCount: matrix2.grandTotal,
+      normalCount: matrix2.grandNormalTotal,
+      vrfCount: matrix2.grandVrfTotal,
+      uncleanedCount: uncleaned2.totalUncleaned,
+      matrix: matrix2,
+    },
+    totalCleaned,
+    totalNormalCleaned: matrix1.grandNormalTotal + matrix2.grandNormalTotal,
+    totalVrfCleaned: matrix1.grandVrfTotal + matrix2.grandVrfTotal,
+    totalActiveUnits: contract.totalActive,
+    uncleanedSummary,
+    contractRemainingUncleaned: Math.max(0, contract.totalActive - totalCleaned),
+    buildings,
+    buildingTotals,
   };
 }
 

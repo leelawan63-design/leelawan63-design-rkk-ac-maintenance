@@ -4,12 +4,15 @@ import { CLEANING_STATUS_LABELS } from '../types';
 import {
   computeBuildingFloorInventory,
   computeContractCounts,
+  computeMajorCycleSummary,
   computeMonthlyCleaningMatrix,
   computeTechnicianStats,
   computeUncleanedSummary,
   formatReportBuildingName,
   formatReportNotes,
   formatReportTechnicianName,
+  getCleaningCycleTypeLabel,
+  getMajorCleaningCycle,
 } from './reportCalc';
 import { formatThaiDate, formatThaiMonthYear } from './thaiDate';
 
@@ -22,16 +25,33 @@ export interface ExportAllReportsParams {
   dailyDate: string;
   startDate: string;
   endDate: string;
+  combineMajorCycle?: boolean;
 }
 
 export function exportAllReportsToSingleExcel(params: ExportAllReportsParams): void {
-  const { company, units, logs, year, month, dailyDate, startDate, endDate } = params;
+  const {
+    company,
+    units,
+    logs,
+    year,
+    month,
+    dailyDate,
+    startDate,
+    endDate,
+    combineMajorCycle = false,
+  } = params;
   const wb = XLSX.utils.book_new();
 
   const contract = computeContractCounts(units);
   const matrix = computeMonthlyCleaningMatrix(logs, units, year, month);
   const uncleaned = computeUncleanedSummary(logs, units, year, month);
   const floorInv = computeBuildingFloorInventory(units);
+  const cycleTypeLabel = getCleaningCycleTypeLabel(month);
+  const majorCycle = getMajorCleaningCycle(month);
+  const majorSummary =
+    combineMajorCycle && majorCycle
+      ? computeMajorCycleSummary(logs, units, year, majorCycle.months)
+      : null;
 
   const monthPrefix = `${year}-${String(month).padStart(2, '0')}`;
   const rangeLogs = logs.filter((l) => {
@@ -57,9 +77,61 @@ export function exportAllReportsToSingleExcel(params: ExportAllReportsParams): v
     ws['!cols'] = colWidths.map((wch) => ({ wch }));
   };
 
+  if (majorSummary && majorCycle) {
+    const sMajorData: (string | number)[][] = [
+      [`สรุปรอบการล้างใหญ่ ประจำรอบ ${majorCycle.label} พ.ศ. ${year + 543} (การล้างใหญ่)`],
+      [`${company.name} | ${company.address}`],
+      [],
+      ['ลำดับ', 'รายการสรุป', 'แอร์ปกติ (เครื่อง)', 'VRF / VRV (เครื่อง)', 'จำนวนรวม (เครื่อง)'],
+      [
+        1,
+        `เดือน${majorSummary.month1.monthName} ${year + 543} (จำนวนที่ล้างได้)`,
+        majorSummary.month1.normalCount,
+        majorSummary.month1.vrfCount,
+        majorSummary.month1.cleanedCount,
+      ],
+      [
+        2,
+        `เดือน${majorSummary.month2.monthName} ${year + 543} (จำนวนที่ล้างได้)`,
+        majorSummary.month2.normalCount,
+        majorSummary.month2.vrfCount,
+        majorSummary.month2.cleanedCount,
+      ],
+      [
+        '',
+        'รวมจำนวนเครื่องที่เข้าล้างได้ทั้งหมด (รวม 2 เดือน)',
+        majorSummary.totalNormalCleaned,
+        majorSummary.totalVrfCleaned,
+        majorSummary.totalCleaned,
+      ],
+      [
+        '',
+        `จำนวนเครื่องที่ไม่ได้เข้าล้าง (ตามรายการบันทึก: คนไข้ ${majorSummary.uncleanedSummary.patientOccupied.count}, ปิดปรับปรุง ${majorSummary.uncleanedSummary.renovation.count}, ไม่มีการ์ด ${majorSummary.uncleanedSummary.noCard.count})`,
+        '',
+        '',
+        majorSummary.uncleanedSummary.totalUncleaned,
+      ],
+      [
+        '',
+        `คงเหลือไม่ได้ล้างเทียบยอดในสัญญาทั้งหมด (${majorSummary.totalActiveUnits} เครื่อง)`,
+        '',
+        '',
+        majorSummary.contractRemainingUncleaned,
+      ],
+    ];
+    const wsMajor = XLSX.utils.aoa_to_sheet(sMajorData);
+    applyExcelPageSetup(wsMajor, [8, 48, 18, 18, 20]);
+    XLSX.utils.book_append_sheet(wb, wsMajor, 'สรุปล้างใหญ่_รวม2เดือน');
+  }
+
   // Sheet 1: สรุปรายเดือน_รายอาคาร
   const s1Data: (string | number)[][] = [
-    [`รายงานสรุปผลการปรนนิบัติบำรุงรักษาเครื่องปรับอากาศ ประจำเดือน ${formatThaiMonthYear(year, month)}`],
+    [
+      `รายงานสรุปผลการปรนนิบัติบำรุงรักษาเครื่องปรับอากาศ ประจำเดือน ${formatThaiMonthYear(
+        year,
+        month
+      )} (${cycleTypeLabel})`,
+    ],
     [`${company.name} | ${company.address}`],
     [`เลขผู้เสียภาษี: ${company.taxId} | โทร: ${company.phone}`],
     [
@@ -92,7 +164,12 @@ export function exportAllReportsToSingleExcel(params: ExportAllReportsParams): v
 
   // Sheet 2: ภาพรวมและรายการไม่ได้ล้าง
   const s2Data: (string | number)[][] = [
-    [`สรุปภาพรวมจำนวนเครื่องที่ไม่ได้เข้าล้าง ประจำเดือน ${formatThaiMonthYear(year, month)} (ไม่รวมเครื่องที่ยกเลิก)`],
+    [
+      `สรุปภาพรวมจำนวนเครื่องที่ไม่ได้เข้าล้าง ประจำเดือน ${formatThaiMonthYear(
+        year,
+        month
+      )} (${cycleTypeLabel}) (ไม่รวมเครื่องที่ยกเลิก)`,
+    ],
     ['สาเหตุที่ไม่ได้เข้าล้าง', 'จำนวน (เครื่อง)'],
     ['2.1 ห้องมีคนไข้', uncleaned.patientOccupied.count],
     ['2.2 ปิดปรับปรุง', uncleaned.renovation.count],
@@ -132,7 +209,12 @@ export function exportAllReportsToSingleExcel(params: ExportAllReportsParams): v
       return a.unitCode.localeCompare(b.unitCode, 'th', { numeric: true });
     });
   const sMonthlyCleaned: (string | number)[][] = [
-    [`บัญชีรายการเครื่องปรับอากาศที่เข้าล้างแล้ว ประจำเดือน ${formatThaiMonthYear(year, month)}`],
+    [
+      `บัญชีรายการเครื่องปรับอากาศที่เข้าล้างแล้ว ประจำเดือน ${formatThaiMonthYear(
+        year,
+        month
+      )} (${cycleTypeLabel})`,
+    ],
     [`${company.name} | โทร ${company.phone}`],
     [],
     ['ลำดับ', 'วันที่', 'อาคาร', 'ชั้น', 'ห้อง', 'หมายเลขเครื่อง', 'ประเภทแอร์', 'ช่างผู้ล้าง', 'หมายเหตุ'],
