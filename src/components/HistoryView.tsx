@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Search, Pencil, Trash2, X, FileSpreadsheet } from 'lucide-react';
+import { Search, Pencil, Trash2, X, FileSpreadsheet, Lock } from 'lucide-react';
 import type {
   ACUnit,
   CleaningLog,
@@ -11,7 +11,8 @@ import { CLEANING_STATUS_LABELS } from '../types';
 import type { TechnicianOption } from '../lib/api';
 import { computeTechnicianStats } from '../lib/reportCalc';
 import { exportAllReportsToSingleExcel } from '../lib/excelExport';
-import { formatThaiDate, getTodayIso } from '../lib/thaiDate';
+import { useDeviceMode } from '../lib/deviceMode';
+import { formatThaiDate, formatThaiMonthYear, getMonthDateRange, getTodayIso } from '../lib/thaiDate';
 
 interface HistoryViewProps {
   user: UserAccount;
@@ -40,8 +41,14 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   onUpdateLog,
   onDeleteLog,
 }) => {
+  const { deviceMode } = useDeviceMode();
   const today = getTodayIso();
-  const monthStart = `${today.slice(0, 7)}-01`;
+  const currentMonth = today.slice(0, 7);
+  const currentMonthRange = useMemo(
+    () => getMonthDateRange(Number(today.slice(0, 4)), Number(today.slice(5, 7))),
+    [today]
+  );
+  const monthStart = `${currentMonth}-01`;
 
   const [startDate, setStartDate] = useState(monthStart);
   const [endDate, setEndDate] = useState(today);
@@ -61,6 +68,16 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
 
   const canEdit = user.role === 'super_admin' || user.permissions.canEditHistory;
   const canDelete = user.role === 'super_admin' || user.permissions.canDeleteHistory;
+  const isCurrentMonthOnly =
+    user.role !== 'super_admin' && Boolean(user.permissions.canModifyCurrentMonthOnly);
+
+  const canModifyRow = (log: CleaningLog) =>
+    !isCurrentMonthOnly || log.date.startsWith(currentMonth);
+
+  const selectableTechnicians = useMemo(() => {
+    if (user.role === 'super_admin') return technicians;
+    return technicians.filter((t) => t.role !== 'super_admin');
+  }, [technicians, user.role]);
 
   const buildings = useMemo(
     () =>
@@ -100,6 +117,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   const uncleanedCount = filteredLogs.filter((l) => l.status !== 'cleaned').length;
 
   const openEdit = (log: CleaningLog) => {
+    if (!canModifyRow(log)) return;
     setEditingLog(log);
     setEditDate(log.date);
     setEditStatus(log.status);
@@ -111,6 +129,15 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   const handleSaveEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingLog) return;
+    if (isCurrentMonthOnly && !editDate.startsWith(currentMonth)) {
+      setErrorMsg(
+        `บัญชีนี้ได้รับสิทธิ์ให้แก้ไขข้อมูลได้เฉพาะเดือนปัจจุบัน (${formatThaiMonthYear(
+          Number(today.slice(0, 4)),
+          Number(today.slice(5, 7))
+        )}) เท่านั้น`
+      );
+      return;
+    }
     setBusy(true);
     setErrorMsg('');
     try {
@@ -167,6 +194,11 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
             <p className="text-sm text-[#64748B] mt-0.5">
               เรียกดูประวัติการล้างตามขอบเขตวันที่ อาคาร สถานะ และรายชื่อช่างเทคนิค
               {!canDelete && ' · สิทธิ์ช่างเทคนิค: ดูย้อนหลังได้เท่านั้น (ไม่สามารถลบข้อมูลเก่าได้)'}
+              {isCurrentMonthOnly &&
+                ` · จำกัดสิทธิ์เพิ่ม/ลบ/แก้ไขเฉพาะเดือนปัจจุบัน (${formatThaiMonthYear(
+                  Number(today.slice(0, 4)),
+                  Number(today.slice(5, 7))
+                )}) เท่านั้น`}
             </p>
           </div>
           <button
@@ -183,14 +215,24 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                 endDate,
               })
             }
-            className="h-10 px-4 rounded-lg bg-[#EAF5EF] hover:bg-[#DCEEE4] border border-[#C6E2D2] text-[#2F6A4E] text-sm font-medium flex items-center gap-2 whitespace-nowrap cursor-pointer"
+            className={`h-10 px-4 rounded-lg bg-[#EAF5EF] hover:bg-[#DCEEE4] border border-[#C6E2D2] text-[#2F6A4E] text-sm font-medium flex items-center justify-center gap-2 whitespace-nowrap cursor-pointer ${
+              deviceMode === 'mobile' ? 'w-full' : ''
+            }`}
           >
             <FileSpreadsheet className="w-4 h-4" />
             ดาวน์โหลด Excel
           </button>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3 pt-2 border-t border-[#E8EEF4]">
+        <div
+          className={`grid gap-3 pt-2 border-t border-[#E8EEF4] ${
+            deviceMode === 'mobile'
+              ? 'grid-cols-1'
+              : deviceMode === 'tablet'
+              ? 'grid-cols-2 md:grid-cols-3'
+              : 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-6'
+          }`}
+        >
           <div className="space-y-1">
             <label className="block text-xs text-[#64748B]">ตั้งแต่วันที่</label>
             <input
@@ -246,7 +288,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
               className="w-full h-9 px-2.5 rounded-lg border border-[#CBD5E1] bg-white text-sm"
             >
               <option value="all">ช่างทุกคน</option>
-              {technicians.map((t) => (
+              {selectableTechnicians.map((t) => (
                 <option key={t.id} value={t.id}>
                   {t.fullName}
                   {t.phone ? ` (${t.phone})` : ''}
@@ -310,103 +352,205 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
         </div>
       </div>
 
-      {/* History Data Table */}
-      <div className="bg-white border border-[#DCE4EE] rounded-xl overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm border-collapse">
-            <thead className="bg-[#F4F7FA] border-b border-[#DCE4EE] text-xs text-[#475569]">
-              <tr>
-                <th className="py-3 px-4 text-left font-semibold">วันที่</th>
-                <th className="py-3 px-4 text-left font-semibold">อาคาร / ชั้น</th>
-                <th className="py-3 px-4 text-left font-semibold">ห้อง</th>
-                <th className="py-3 px-4 text-left font-semibold">หมายเลขเครื่อง</th>
-                <th className="py-3 px-4 text-left font-semibold">ประเภท</th>
-                <th className="py-3 px-4 text-left font-semibold">สถานะ</th>
-                <th className="py-3 px-4 text-left font-semibold">ช่างผู้ปฏิบัติงาน</th>
-                <th className="py-3 px-4 text-left font-semibold">หมายเหตุ</th>
-                {(canEdit || canDelete) && (
-                  <th className="py-3 px-4 text-right font-semibold">จัดการ</th>
-                )}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-[#EEF2F6]">
-              {filteredLogs.length === 0 ? (
-                <tr>
-                  <td
-                    colSpan={canEdit || canDelete ? 9 : 8}
-                    className="py-12 text-center text-sm text-[#64748B]"
-                  >
-                    ไม่พบประวัติการล้างในช่วงวันที่และเงื่อนไขที่เลือก
-                  </td>
-                </tr>
-              ) : (
-                filteredLogs.map((log) => (
-                  <tr key={log.id} className="hover:bg-[#F8FAFC]">
-                    <td className="py-3 px-4 whitespace-nowrap tabular-nums text-[#334155]">
-                      {formatThaiDate(log.date, true)}
-                    </td>
-                    <td className="py-3 px-4">
-                      <div className="font-medium text-[#1E293B]">{log.building}</div>
-                      <div className="text-xs text-[#64748B]">{log.floor}</div>
-                    </td>
-                    <td className="py-3 px-4 text-[#334155]">{log.room}</td>
-                    <td className="py-3 px-4 font-mono-tabular font-medium text-[#3B6684] whitespace-nowrap">
-                      {log.unitCode}
-                    </td>
-                    <td className="py-3 px-4 whitespace-nowrap text-xs text-[#475569]">
-                      {log.acType === 'vrf' ? 'VRF / VRV' : 'แอร์ปกติ'}
-                    </td>
-                    <td className="py-3 px-4 whitespace-nowrap">
-                      <span
-                        className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${statusTone(
-                          log.status
-                        )}`}
-                      >
-                        {CLEANING_STATUS_LABELS[log.status]}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4 whitespace-nowrap text-[#1E293B]">
-                      {log.technicianName}
-                    </td>
-                    <td className="py-3 px-4 text-xs text-[#64748B] max-w-[220px] truncate">
-                      {log.notes || '-'}
-                    </td>
+      {/* History Data View */}
+      {deviceMode === 'mobile' ? (
+        <div className="space-y-2.5">
+          {filteredLogs.length === 0 ? (
+            <div className="bg-white border border-[#DCE4EE] rounded-xl py-10 px-4 text-center text-sm text-[#64748B]">
+              ไม่พบประวัติการล้างในช่วงวันที่และเงื่อนไขที่เลือก
+            </div>
+          ) : (
+            filteredLogs.map((log) => {
+              const rowAllowed = canModifyRow(log);
+              return (
+                <div
+                  key={log.id}
+                  className="bg-white border border-[#DCE4EE] rounded-xl p-3.5 space-y-2"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-mono-tabular font-semibold text-sm text-[#3B6684]">
+                          {log.unitCode}
+                        </span>
+                        <span
+                          className={`inline-block px-2 py-0.5 rounded text-[11px] font-medium ${statusTone(
+                            log.status
+                          )}`}
+                        >
+                          {CLEANING_STATUS_LABELS[log.status]}
+                        </span>
+                      </div>
+                      <div className="text-sm font-medium text-[#1E293B] mt-0.5">{log.room}</div>
+                      <div className="text-xs text-[#64748B]">
+                        {log.building} · {log.floor} · {log.acType === 'vrf' ? 'VRF / VRV' : 'แอร์ปกติ'}
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <div className="text-xs font-medium text-[#334155] tabular-nums">
+                        {formatThaiDate(log.date, true)}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-2 pt-2 border-t border-[#EEF2F6] text-xs">
+                    <div className="text-[#475569] min-w-0 truncate">
+                      ช่าง: <span className="font-medium text-[#1E293B]">{log.technicianName}</span>
+                      {log.notes ? ` · ${log.notes}` : ''}
+                    </div>
                     {(canEdit || canDelete) && (
-                      <td className="py-3 px-4 text-right whitespace-nowrap">
-                        <div className="inline-flex items-center gap-1">
-                          {canEdit && (
-                            <button
-                              type="button"
-                              onClick={() => openEdit(log)}
-                              aria-label="แก้ไข"
-                              className="p-1.5 rounded-md text-[#4A7C9B] hover:bg-[#EAF2F8] cursor-pointer"
-                            >
-                              <Pencil className="w-4 h-4" />
-                            </button>
-                          )}
-                          {canDelete && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setDeletingLog(log);
-                                setErrorMsg('');
-                              }}
-                              aria-label="ลบ"
-                              className="p-1.5 rounded-md text-[#9D3E4E] hover:bg-[#FDF0F2] cursor-pointer"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          )}
-                        </div>
-                      </td>
+                      <div className="flex items-center gap-1 shrink-0">
+                        {rowAllowed ? (
+                          <>
+                            {canEdit && (
+                              <button
+                                type="button"
+                                onClick={() => openEdit(log)}
+                                className="h-8 px-2.5 rounded-lg border border-[#DCE4EE] text-[#4A7C9B] bg-[#F8FAFC] text-xs font-medium inline-flex items-center gap-1 cursor-pointer"
+                              >
+                                <Pencil className="w-3.5 h-3.5" />
+                                แก้ไข
+                              </button>
+                            )}
+                            {canDelete && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setDeletingLog(log);
+                                  setErrorMsg('');
+                                }}
+                                className="h-8 px-2.5 rounded-lg border border-[#F3CCD3] text-[#9D3E4E] bg-[#FDF0F2] text-xs font-medium inline-flex items-center gap-1 cursor-pointer"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                                ลบ
+                              </button>
+                            )}
+                          </>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-[#F1F5F9] text-[11px] text-[#64748B]">
+                            <Lock className="w-3 h-3" />
+                            ล็อกเดือนเก่า
+                          </span>
+                        )}
+                      </div>
                     )}
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                  </div>
+                </div>
+              );
+            })
+          )}
         </div>
-      </div>
+      ) : (
+        <div className="bg-white border border-[#DCE4EE] rounded-xl overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm border-collapse">
+              <thead className="bg-[#F4F7FA] border-b border-[#DCE4EE] text-xs text-[#475569]">
+                <tr>
+                  <th className="py-3 px-4 text-left font-semibold">วันที่</th>
+                  <th className="py-3 px-4 text-left font-semibold">อาคาร / ชั้น</th>
+                  <th className="py-3 px-4 text-left font-semibold">ห้อง</th>
+                  <th className="py-3 px-4 text-left font-semibold">หมายเลขเครื่อง</th>
+                  <th className="py-3 px-4 text-left font-semibold">ประเภท</th>
+                  <th className="py-3 px-4 text-left font-semibold">สถานะ</th>
+                  <th className="py-3 px-4 text-left font-semibold">ช่างผู้ปฏิบัติงาน</th>
+                  <th className="py-3 px-4 text-left font-semibold">หมายเหตุ</th>
+                  {(canEdit || canDelete) && (
+                    <th className="py-3 px-4 text-right font-semibold">จัดการ</th>
+                  )}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#EEF2F6]">
+                {filteredLogs.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={canEdit || canDelete ? 9 : 8}
+                      className="py-12 text-center text-sm text-[#64748B]"
+                    >
+                      ไม่พบประวัติการล้างในช่วงวันที่และเงื่อนไขที่เลือก
+                    </td>
+                  </tr>
+                ) : (
+                  filteredLogs.map((log) => {
+                    const rowAllowed = canModifyRow(log);
+                    return (
+                      <tr key={log.id} className="hover:bg-[#F8FAFC]">
+                        <td className="py-3 px-4 whitespace-nowrap tabular-nums text-[#334155]">
+                          {formatThaiDate(log.date, true)}
+                        </td>
+                        <td className="py-3 px-4">
+                          <div className="font-medium text-[#1E293B]">{log.building}</div>
+                          <div className="text-xs text-[#64748B]">{log.floor}</div>
+                        </td>
+                        <td className="py-3 px-4 text-[#334155]">{log.room}</td>
+                        <td className="py-3 px-4 font-mono-tabular font-medium text-[#3B6684] whitespace-nowrap">
+                          {log.unitCode}
+                        </td>
+                        <td className="py-3 px-4 whitespace-nowrap text-xs text-[#475569]">
+                          {log.acType === 'vrf' ? 'VRF / VRV' : 'แอร์ปกติ'}
+                        </td>
+                        <td className="py-3 px-4 whitespace-nowrap">
+                          <span
+                            className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${statusTone(
+                              log.status
+                            )}`}
+                          >
+                            {CLEANING_STATUS_LABELS[log.status]}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 whitespace-nowrap text-[#1E293B]">
+                          {log.technicianName}
+                        </td>
+                        <td className="py-3 px-4 text-xs text-[#64748B] max-w-[220px] truncate">
+                          {log.notes || '-'}
+                        </td>
+                        {(canEdit || canDelete) && (
+                          <td className="py-3 px-4 text-right whitespace-nowrap">
+                            {rowAllowed ? (
+                              <div className="inline-flex items-center gap-1">
+                                {canEdit && (
+                                  <button
+                                    type="button"
+                                    onClick={() => openEdit(log)}
+                                    aria-label="แก้ไข"
+                                    className="p-1.5 rounded-md text-[#4A7C9B] hover:bg-[#EAF2F8] cursor-pointer"
+                                  >
+                                    <Pencil className="w-4 h-4" />
+                                  </button>
+                                )}
+                                {canDelete && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setDeletingLog(log);
+                                      setErrorMsg('');
+                                    }}
+                                    aria-label="ลบ"
+                                    className="p-1.5 rounded-md text-[#9D3E4E] hover:bg-[#FDF0F2] cursor-pointer"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                )}
+                              </div>
+                            ) : (
+                              <span
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-[#F1F5F9] text-[11px] text-[#64748B]"
+                                title="บัญชีนี้จำกัดสิทธิ์เพิ่ม/ลบ/แก้ไขเฉพาะเดือนปัจจุบันเท่านั้น"
+                              >
+                                <Lock className="w-3 h-3" />
+                                ล็อกเดือนเก่า
+                              </span>
+                            )}
+                          </td>
+                        )}
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* Edit Modal */}
       {editingLog && (
@@ -438,9 +582,18 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                 <input
                   type="date"
                   value={editDate}
+                  min={isCurrentMonthOnly ? currentMonthRange.startDate : undefined}
+                  max={isCurrentMonthOnly ? currentMonthRange.endDate : undefined}
                   onChange={(e) => setEditDate(e.target.value)}
                   className="w-full h-9 px-3 rounded-lg border border-[#CBD5E1] text-sm"
                 />
+                {isCurrentMonthOnly && (
+                  <p className="text-[11px] text-[#8C5E26]">
+                    บัญชีนี้แก้ไขได้เฉพาะวันที่ภายในเดือน{' '}
+                    {formatThaiMonthYear(Number(today.slice(0, 4)), Number(today.slice(5, 7)))}{' '}
+                    เท่านั้น
+                  </p>
+                )}
               </div>
               <div className="space-y-1">
                 <label className="block text-xs font-medium text-[#475569]">สถานะ</label>
@@ -466,7 +619,13 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                   {editingLog.technicianId === 'import-2569' && (
                     <option value="import-2569">ข้อมูลตามไฟล์ 2569 (ยังไม่ระบุช่าง)</option>
                   )}
-                  {technicians.map((t) => (
+                  {!selectableTechnicians.some((t) => t.id === editingLog.technicianId) &&
+                    editingLog.technicianId !== 'import-2569' && (
+                      <option value={editingLog.technicianId}>
+                        {editingLog.technicianName}
+                      </option>
+                    )}
+                  {selectableTechnicians.map((t) => (
                     <option key={t.id} value={t.id}>
                       {t.fullName}
                       {t.phone ? ` (${t.phone})` : ''}

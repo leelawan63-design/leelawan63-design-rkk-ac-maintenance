@@ -22,6 +22,10 @@ const PERMISSION_LABELS: Array<{ key: keyof UserPermissions; label: string }> = 
   { key: 'canViewReports', label: 'ดูประวัติย้อนหลังและรายงาน' },
   { key: 'canEditHistory', label: 'แก้ไขข้อมูลการล้างย้อนหลัง' },
   { key: 'canDeleteHistory', label: 'ลบข้อมูลการล้างเก่า' },
+  {
+    key: 'canModifyCurrentMonthOnly',
+    label: 'สามารถเพิ่ม ลบ แก้ไขข้อมูลการล้างเดือนปัจจุบันเท่านั้น',
+  },
   { key: 'canManageInventory', label: 'จัดการทะเบียนเครื่องปรับอากาศ' },
   { key: 'canManageTechnicians', label: 'จัดการรายชื่อช่างเทคนิค (ชื่อ-เบอร์โทร)' },
   { key: 'canSyncSheets', label: 'เชื่อมต่อและซิงค์ Google Sheets' },
@@ -410,6 +414,11 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
                         ) : (
                           <span className="text-[#9D3E4E]">ไม่อนุญาต</span>
                         )}
+                        {u.role !== 'super_admin' && u.permissions.canModifyCurrentMonthOnly && (
+                          <span className="block text-[11px] text-[#8C5E26]">
+                            (เฉพาะเดือนปัจจุบันเท่านั้น)
+                          </span>
+                        )}
                       </td>
                       <td className="py-2.5 px-4 text-xs">
                         {u.active ? (
@@ -547,7 +556,11 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
                   >
                     <input
                       type="checkbox"
-                      checked={uRole === 'super_admin' ? true : uPerms[item.key]}
+                      checked={
+                        uRole === 'super_admin'
+                          ? item.key !== 'canModifyCurrentMonthOnly'
+                          : Boolean(uPerms[item.key])
+                      }
                       disabled={uRole === 'super_admin'}
                       onChange={(e) =>
                         setUPerms((prev) => ({ ...prev, [item.key]: e.target.checked }))

@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Plus, Check, Trash2, Save, Search } from 'lucide-react';
+import { Plus, Check, Trash2, Save, Search, ChevronDown, ChevronUp } from 'lucide-react';
 import type {
   ACType,
   ACUnit,
@@ -10,7 +10,8 @@ import type {
 } from '../types';
 import { CLEANING_STATUS_LABELS } from '../types';
 import type { TechnicianOption } from '../lib/api';
-import { formatThaiDate, getTodayIso } from '../lib/thaiDate';
+import { useDeviceMode } from '../lib/deviceMode';
+import { formatThaiDate, formatThaiMonthYear, getMonthDateRange, getTodayIso } from '../lib/thaiDate';
 
 interface DailyEntryViewProps {
   user: UserAccount;
@@ -42,6 +43,18 @@ export const DailyEntryView: React.FC<DailyEntryViewProps> = ({
   technicians,
   onSaveBatch,
 }) => {
+  const { deviceMode } = useDeviceMode();
+  const isTouchMode = deviceMode === 'mobile' || deviceMode === 'tablet';
+
+  const today = getTodayIso();
+  const currentMonthPrefix = today.slice(0, 7);
+  const currentMonthRange = useMemo(
+    () => getMonthDateRange(Number(today.slice(0, 4)), Number(today.slice(5, 7))),
+    [today]
+  );
+  const isCurrentMonthOnly =
+    user.role !== 'super_admin' && Boolean(user.permissions.canModifyCurrentMonthOnly);
+
   const buildings = useMemo(
     () =>
       Array.from(new Set(units.map((u) => u.building))).sort((a, b) =>
@@ -50,7 +63,12 @@ export const DailyEntryView: React.FC<DailyEntryViewProps> = ({
     [units]
   );
 
-  const [date, setDate] = useState(getTodayIso());
+  const selectableTechnicians = useMemo(() => {
+    if (user.role === 'super_admin') return technicians;
+    return technicians.filter((t) => t.role !== 'super_admin');
+  }, [technicians, user.role]);
+
+  const [date, setDate] = useState(today);
   const [selectedBuilding, setSelectedBuilding] = useState(buildings[0] || '');
   const [customBuilding, setCustomBuilding] = useState('');
   const [useCustomBuilding, setUseCustomBuilding] = useState(false);
@@ -59,6 +77,8 @@ export const DailyEntryView: React.FC<DailyEntryViewProps> = ({
   const [floorFilter, setFloorFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [defaultStatus, setDefaultStatus] = useState<CleaningStatus>('cleaned');
+  const [showLoggedInMonth, setShowLoggedInMonth] = useState(false);
+  const [showManualUnitForm, setShowManualUnitForm] = useState(false);
 
   const [staged, setStaged] = useState<StagedEntry[]>([]);
   const [saving, setSaving] = useState(false);
@@ -78,6 +98,12 @@ export const DailyEntryView: React.FC<DailyEntryViewProps> = ({
   const [manualStatus, setManualStatus] = useState<CleaningStatus>('cleaned');
   const [manualNotes, setManualNotes] = useState('');
 
+  const effectiveTechnicianId = useMemo(() => {
+    if (user.role === 'technician') return user.id;
+    if (selectableTechnicians.some((t) => t.id === technicianId)) return technicianId;
+    return selectableTechnicians[0]?.id || user.id;
+  }, [user.role, user.id, selectableTechnicians, technicianId]);
+
   const activeBuilding = useCustomBuilding
     ? customBuilding.trim()
     : selectedBuilding || buildings[0] || '';
@@ -87,6 +113,35 @@ export const DailyEntryView: React.FC<DailyEntryViewProps> = ({
       (u) => u.building === activeBuilding && u.status !== 'cancelled'
     );
   }, [units, activeBuilding]);
+
+  const selectedMonthPrefix = date.slice(0, 7);
+
+  const loggedInMonthMap = useMemo(() => {
+    const byId = new Map<string, CleaningLog>();
+    const byKey = new Map<string, CleaningLog>();
+    for (const l of logs) {
+      if (l.date.startsWith(selectedMonthPrefix)) {
+        byId.set(l.unitId, l);
+        byKey.set(`${l.building.trim()}::${l.unitCode.trim().toLowerCase()}`, l);
+      }
+    }
+    return { byId, byKey };
+  }, [logs, selectedMonthPrefix]);
+
+  const getMonthLogForUnit = (u: ACUnit): CleaningLog | undefined => {
+    return (
+      loggedInMonthMap.byId.get(u.id) ||
+      loggedInMonthMap.byKey.get(`${u.building.trim()}::${u.unitCode.trim().toLowerCase()}`)
+    );
+  };
+
+  const loggedInMonthCountInBuilding = useMemo(() => {
+    let count = 0;
+    for (const u of buildingUnits) {
+      if (getMonthLogForUnit(u)) count++;
+    }
+    return count;
+  }, [buildingUnits, loggedInMonthMap]);
 
   const floorsInBuilding = useMemo(
     () =>
@@ -98,6 +153,7 @@ export const DailyEntryView: React.FC<DailyEntryViewProps> = ({
 
   const filteredBuildingUnits = useMemo(() => {
     return buildingUnits.filter((u) => {
+      if (!showLoggedInMonth && getMonthLogForUnit(u)) return false;
       if (floorFilter !== 'all' && u.floor !== floorFilter) return false;
       if (searchQuery.trim()) {
         const q = searchQuery.trim().toLowerCase();
@@ -109,7 +165,7 @@ export const DailyEntryView: React.FC<DailyEntryViewProps> = ({
       }
       return true;
     });
-  }, [buildingUnits, floorFilter, searchQuery]);
+  }, [buildingUnits, showLoggedInMonth, loggedInMonthMap, floorFilter, searchQuery]);
 
   const loggedTodayMap = useMemo(() => {
     const map = new Map<string, CleaningLog>();
@@ -122,17 +178,16 @@ export const DailyEntryView: React.FC<DailyEntryViewProps> = ({
   }, [logs, date]);
 
   const myTodayStats = useMemo(() => {
-    const targetTechId = user.role === 'technician' ? user.id : technicianId;
-    const todayLogs = logs.filter((l) => l.date === date && l.technicianId === targetTechId);
+    const todayLogs = logs.filter((l) => l.date === date && l.technicianId === effectiveTechnicianId);
     const allMyCleaned = logs.filter(
-      (l) => l.technicianId === targetTechId && l.status === 'cleaned'
+      (l) => l.technicianId === effectiveTechnicianId && l.status === 'cleaned'
     );
     return {
       todayCleaned: todayLogs.filter((l) => l.status === 'cleaned').length,
       todayTotal: todayLogs.length,
       allTimeCleaned: allMyCleaned.length,
     };
-  }, [logs, date, technicianId, user]);
+  }, [logs, date, effectiveTechnicianId]);
 
   const addExistingUnitToStage = (unit: ACUnit, statusOverride?: CleaningStatus) => {
     setFeedback(null);
@@ -249,12 +304,19 @@ export const DailyEntryView: React.FC<DailyEntryViewProps> = ({
       setFeedback({ type: 'error', text: 'กรุณาเลือกรายการเครื่องปรับอากาศอย่างน้อย 1 รายการ' });
       return;
     }
+    if (isCurrentMonthOnly && !date.startsWith(currentMonthPrefix)) {
+      setFeedback({
+        type: 'error',
+        text: 'สิทธิ์ของคุณอนุญาตให้เพิ่มข้อมูลการล้างเฉพาะเดือนปัจจุบันเท่านั้น',
+      });
+      return;
+    }
     setSaving(true);
     setFeedback(null);
     try {
       await onSaveBatch({
         date,
-        technicianId: user.role === 'technician' ? user.id : technicianId,
+        technicianId: effectiveTechnicianId,
         items: staged.map(({ tempKey: _k, ...rest }) => rest),
       });
       setStaged([]);
@@ -293,7 +355,8 @@ export const DailyEntryView: React.FC<DailyEntryViewProps> = ({
               ยอดงานของ{' '}
               {user.role === 'technician'
                 ? user.fullName
-                : technicians.find((t) => t.id === technicianId)?.fullName || user.fullName}
+                : selectableTechnicians.find((t) => t.id === effectiveTechnicianId)?.fullName ||
+                  user.fullName}
               :
             </span>{' '}
             วันนี้ล้างแล้ว {myTodayStats.todayCleaned} เครื่อง (สะสมทั้งหมด {myTodayStats.allTimeCleaned}{' '}
@@ -301,7 +364,11 @@ export const DailyEntryView: React.FC<DailyEntryViewProps> = ({
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2 border-t border-[#E8EEF4]">
+        <div
+          className={`grid gap-4 pt-2 border-t border-[#E8EEF4] ${
+            deviceMode === 'mobile' ? 'grid-cols-1' : 'grid-cols-1 md:grid-cols-3'
+          }`}
+        >
           <div className="space-y-1.5">
             <label htmlFor="daily-date" className="block text-xs font-medium text-[#475569]">
               วันที่เข้าล้าง
@@ -310,9 +377,19 @@ export const DailyEntryView: React.FC<DailyEntryViewProps> = ({
               id="daily-date"
               type="date"
               value={date}
+              min={isCurrentMonthOnly ? currentMonthRange.startDate : undefined}
+              max={isCurrentMonthOnly ? currentMonthRange.endDate : undefined}
               onChange={(e) => setDate(e.target.value)}
-              className="w-full h-10 px-3 rounded-lg border border-[#CBD5E1] bg-white text-sm text-[#1E293B] focus:outline-none focus:border-[#4A7C9B]"
+              className={`w-full ${
+                isTouchMode ? 'h-11' : 'h-10'
+              } px-3 rounded-lg border border-[#CBD5E1] bg-white text-sm text-[#1E293B] focus:outline-none focus:border-[#4A7C9B]`}
             />
+            {isCurrentMonthOnly && (
+              <p className="text-[11px] text-[#8C5E26]">
+                จำกัดสิทธิ์: บันทึกได้เฉพาะเดือน{' '}
+                {formatThaiMonthYear(Number(today.slice(0, 4)), Number(today.slice(5, 7)))} เท่านั้น
+              </p>
+            )}
           </div>
 
           <div className="space-y-1.5">
@@ -335,7 +412,9 @@ export const DailyEntryView: React.FC<DailyEntryViewProps> = ({
                 value={customBuilding}
                 onChange={(e) => setCustomBuilding(e.target.value)}
                 placeholder="ระบุชื่ออาคารใหม่..."
-                className="w-full h-10 px-3 rounded-lg border border-[#CBD5E1] bg-white text-sm text-[#1E293B] focus:outline-none focus:border-[#4A7C9B]"
+                className={`w-full ${
+                  isTouchMode ? 'h-11' : 'h-10'
+                } px-3 rounded-lg border border-[#CBD5E1] bg-white text-sm text-[#1E293B] focus:outline-none focus:border-[#4A7C9B]`}
               />
             ) : (
               <select
@@ -345,7 +424,9 @@ export const DailyEntryView: React.FC<DailyEntryViewProps> = ({
                   setSelectedBuilding(e.target.value);
                   setFloorFilter('all');
                 }}
-                className="w-full h-10 px-3 rounded-lg border border-[#CBD5E1] bg-white text-sm text-[#1E293B] focus:outline-none focus:border-[#4A7C9B]"
+                className={`w-full ${
+                  isTouchMode ? 'h-11' : 'h-10'
+                } px-3 rounded-lg border border-[#CBD5E1] bg-white text-sm text-[#1E293B] focus:outline-none focus:border-[#4A7C9B]`}
               >
                 {buildings.map((b) => (
                   <option key={b} value={b}>
@@ -366,16 +447,20 @@ export const DailyEntryView: React.FC<DailyEntryViewProps> = ({
                 type="text"
                 readOnly
                 value={`${user.fullName} (ล็อกอินตามชื่อผู้ใช้งาน)`}
-                className="w-full h-10 px-3 rounded-lg border border-[#DCE4EE] bg-[#F8FAFC] text-sm text-[#475569]"
+                className={`w-full ${
+                  isTouchMode ? 'h-11' : 'h-10'
+                } px-3 rounded-lg border border-[#DCE4EE] bg-[#F8FAFC] text-sm text-[#475569]`}
               />
             ) : (
               <select
                 id="daily-tech"
-                value={technicianId}
+                value={effectiveTechnicianId}
                 onChange={(e) => setTechnicianId(e.target.value)}
-                className="w-full h-10 px-3 rounded-lg border border-[#CBD5E1] bg-white text-sm text-[#1E293B] focus:outline-none focus:border-[#4A7C9B]"
+                className={`w-full ${
+                  isTouchMode ? 'h-11' : 'h-10'
+                } px-3 rounded-lg border border-[#CBD5E1] bg-white text-sm text-[#1E293B] focus:outline-none focus:border-[#4A7C9B]`}
               >
-                {technicians.map((t) => (
+                {selectableTechnicians.map((t) => (
                   <option key={t.id} value={t.id}>
                     {t.fullName}
                     {t.phone ? ` (${t.phone})` : ''}
@@ -401,9 +486,13 @@ export const DailyEntryView: React.FC<DailyEntryViewProps> = ({
       )}
 
       {/* Main Split Workspace */}
-      <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
+      <div
+        className={`grid gap-6 items-start ${
+          deviceMode === 'desktop' ? 'grid-cols-1 xl:grid-cols-12' : 'grid-cols-1'
+        }`}
+      >
         {/* Left: Pull Existing Units + Add Manual Unit */}
-        <div className="xl:col-span-7 space-y-6">
+        <div className={`${deviceMode === 'desktop' ? 'xl:col-span-7' : ''} space-y-6`}>
           {/* Pull Existing Units */}
           <div className="bg-white border border-[#DCE4EE] rounded-xl p-5 space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -412,10 +501,13 @@ export const DailyEntryView: React.FC<DailyEntryViewProps> = ({
                   1. ดึงข้อมูลเครื่องปรับอากาศจากทะเบียนในระบบ
                 </h2>
                 <p className="text-xs text-[#64748B]">
-                  อาคาร: {activeBuilding || '-'} · พบ {filteredBuildingUnits.length} เครื่องที่ใช้งาน
+                  อาคาร: {activeBuilding || '-'} · เหลือที่ยังไม่บันทึกเดือนนี้{' '}
+                  {filteredBuildingUnits.length} เครื่อง
+                  {loggedInMonthCountInBuilding > 0 &&
+                    ` (ซ่อนที่บันทึกเดือนนี้แล้ว ${loggedInMonthCountInBuilding} เครื่อง)`}
                 </p>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <select
                   aria-label="สถานะเริ่มต้นเมื่อเลือก"
                   value={defaultStatus}
@@ -447,14 +539,14 @@ export const DailyEntryView: React.FC<DailyEntryViewProps> = ({
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder="ค้นหาห้อง หรือ หมายเลขเครื่อง..."
-                  className="w-full h-9 pl-9 pr-3 rounded-lg border border-[#CBD5E1] text-sm"
+                  className={`w-full ${isTouchMode ? 'h-10' : 'h-9'} pl-9 pr-3 rounded-lg border border-[#CBD5E1] text-sm`}
                 />
               </div>
               <select
                 aria-label="กรองตามชั้น"
                 value={floorFilter}
                 onChange={(e) => setFloorFilter(e.target.value)}
-                className="h-9 px-3 rounded-lg border border-[#CBD5E1] bg-white text-sm"
+                className={`${isTouchMode ? 'h-10' : 'h-9'} px-3 rounded-lg border border-[#CBD5E1] bg-white text-sm`}
               >
                 <option value="all">ทุกชั้น</option>
                 {floorsInBuilding.map((f) => (
@@ -465,9 +557,25 @@ export const DailyEntryView: React.FC<DailyEntryViewProps> = ({
               </select>
             </div>
 
+            {loggedInMonthCountInBuilding > 0 && (
+              <label className="inline-flex items-center gap-2 text-xs text-[#475569] cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={showLoggedInMonth}
+                  onChange={(e) => setShowLoggedInMonth(e.target.checked)}
+                  className="rounded border-[#CBD5E1]"
+                />
+                <span>
+                  แสดงเครื่องที่ถูกบันทึกในเดือนนี้แล้วด้วย ({loggedInMonthCountInBuilding} เครื่อง)
+                </span>
+              </label>
+            )}
+
             {filteredBuildingUnits.length === 0 ? (
               <div className="py-8 text-center text-sm text-[#64748B] bg-[#F8FAFC] rounded-lg border border-dashed border-[#DCE4EE]">
-                ไม่พบเครื่องปรับอากาศในอาคารนี้ ท่านสามารถเพิ่มข้อมูลใหม่ได้ที่แบบฟอร์มด้านล่าง
+                {buildingUnits.length > 0 && loggedInMonthCountInBuilding === buildingUnits.length && !showLoggedInMonth
+                  ? 'เครื่องปรับอากาศทั้งหมดในอาคารนี้ถูกบันทึกข้อมูลในเดือนนี้ครบแล้ว'
+                  : 'ไม่พบเครื่องปรับอากาศตามเงื่อนไข ท่านสามารถเปิดฟอร์มด้านล่างเพื่อเพิ่มเครื่องใหม่ได้'}
               </div>
             ) : (
               <div className="max-h-96 overflow-y-auto border border-[#E2E8F0] rounded-lg divide-y divide-[#F1F5F9]">
@@ -476,6 +584,7 @@ export const DailyEntryView: React.FC<DailyEntryViewProps> = ({
                     (s) => s.mode === 'existing' && s.unitId === u.id
                   );
                   const existingToday = loggedTodayMap.get(u.id);
+                  const existingMonth = getMonthLogForUnit(u);
                   return (
                     <div
                       key={u.id}
@@ -499,40 +608,58 @@ export const DailyEntryView: React.FC<DailyEntryViewProps> = ({
                           ]
                             .filter(Boolean)
                             .join(' · ')}
-                          {existingToday && (
+                          {existingToday ? (
                             <span className="ml-2 text-[#3C7356] font-medium">
                               (บันทึกวันนี้แล้ว: {CLEANING_STATUS_LABELS[existingToday.status]})
                             </span>
-                          )}
+                          ) : existingMonth ? (
+                            <span className="ml-2 text-[#4A7C9B] font-medium">
+                              (บันทึกเดือนนี้แล้ว: {formatThaiDate(existingMonth.date, true)})
+                            </span>
+                          ) : null}
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-1.5 shrink-0">
+                      <div
+                        className={`${
+                          deviceMode === 'mobile'
+                            ? 'grid grid-cols-2 gap-1.5 w-full'
+                            : 'flex items-center gap-1.5 shrink-0'
+                        }`}
+                      >
                         <button
                           type="button"
                           onClick={() => addExistingUnitToStage(u, 'cleaned')}
-                          className="h-8 px-2.5 rounded-md bg-[#ECF6F1] hover:bg-[#DCEEE4] text-[#25593E] text-xs font-medium cursor-pointer"
+                          className={`${
+                            deviceMode === 'mobile' ? 'h-9' : 'h-8'
+                          } px-2.5 rounded-md bg-[#ECF6F1] hover:bg-[#DCEEE4] text-[#25593E] text-xs font-medium cursor-pointer`}
                         >
                           ล้างแล้ว
                         </button>
                         <button
                           type="button"
                           onClick={() => addExistingUnitToStage(u, 'patient_occupied')}
-                          className="h-8 px-2.5 rounded-md bg-[#FDF6EC] hover:bg-[#F9EBD6] text-[#8C5E26] text-xs font-medium cursor-pointer"
+                          className={`${
+                            deviceMode === 'mobile' ? 'h-9' : 'h-8'
+                          } px-2.5 rounded-md bg-[#FDF6EC] hover:bg-[#F9EBD6] text-[#8C5E26] text-xs font-medium cursor-pointer`}
                         >
                           คนไข้
                         </button>
                         <button
                           type="button"
                           onClick={() => addExistingUnitToStage(u, 'renovation')}
-                          className="h-8 px-2.5 rounded-md bg-[#F3F0FA] hover:bg-[#E7E1F5] text-[#5B4B85] text-xs font-medium cursor-pointer"
+                          className={`${
+                            deviceMode === 'mobile' ? 'h-9' : 'h-8'
+                          } px-2.5 rounded-md bg-[#F3F0FA] hover:bg-[#E7E1F5] text-[#5B4B85] text-xs font-medium cursor-pointer`}
                         >
                           ปรับปรุง
                         </button>
                         <button
                           type="button"
                           onClick={() => addExistingUnitToStage(u, 'no_card')}
-                          className="h-8 px-2.5 rounded-md bg-[#FDF0F2] hover:bg-[#F9E0E5] text-[#9D3E4E] text-xs font-medium cursor-pointer"
+                          className={`${
+                            deviceMode === 'mobile' ? 'h-9' : 'h-8'
+                          } px-2.5 rounded-md bg-[#FDF0F2] hover:bg-[#F9E0E5] text-[#9D3E4E] text-xs font-medium cursor-pointer`}
                         >
                           ไม่มีการ์ด
                         </button>
@@ -544,20 +671,52 @@ export const DailyEntryView: React.FC<DailyEntryViewProps> = ({
             )}
           </div>
 
-          {/* Add New Manual AC Unit */}
-          <form
-            onSubmit={handleAddManualUnit}
-            className="bg-white border border-[#DCE4EE] rounded-xl p-5 space-y-4"
-          >
-            <div>
-              <h2 className="text-base font-semibold text-[#1E293B]">
-                2. เพิ่มเครื่องปรับอากาศใหม่ด้วยตนเอง (ต่อท้ายตามอาคาร)
-              </h2>
-              <p className="text-xs text-[#64748B]">
-                หากหน้างานมีเครื่องปรับอากาศที่ยังไม่อยู่ในทะเบียน กรอกข้อมูลด้านล่าง ระบบจะบันทึกงานล้างและเพิ่มเข้าทะเบียนต่อท้ายของอาคาร{' '}
-                <span className="font-medium text-[#1E293B]">{activeBuilding || '-'}</span>
-              </p>
+          {/* Add New Manual AC Unit (Shown only when user chooses) */}
+          {!showManualUnitForm ? (
+            <div className="bg-white border border-[#DCE4EE] rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-semibold text-[#1E293B]">
+                  2. เพิ่มเครื่องปรับอากาศใหม่ด้วยตนเอง (ต่อท้ายตามอาคาร)
+                </h2>
+                <p className="text-xs text-[#64748B]">
+                  กดเปิดฟอร์มเฉพาะกรณีพบเครื่องปรับอากาศใหม่ที่ยังไม่มีในทะเบียนของอาคาร{' '}
+                  <span className="font-medium text-[#1E293B]">{activeBuilding || '-'}</span>
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowManualUnitForm(true)}
+                className="h-9 px-3.5 rounded-lg bg-[#EAF2F8] hover:bg-[#DCE9F4] text-[#2F5A78] text-xs font-medium flex items-center justify-center gap-1.5 whitespace-nowrap cursor-pointer shrink-0"
+              >
+                <Plus className="w-4 h-4" />
+                <span>เพิ่มเครื่องใหม่ด้วยตนเอง</span>
+                <ChevronDown className="w-3.5 h-3.5" />
+              </button>
             </div>
+          ) : (
+            <form
+              onSubmit={handleAddManualUnit}
+              className="bg-white border border-[#DCE4EE] rounded-xl p-5 space-y-4"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-base font-semibold text-[#1E293B]">
+                    2. เพิ่มเครื่องปรับอากาศใหม่ด้วยตนเอง (ต่อท้ายตามอาคาร)
+                  </h2>
+                  <p className="text-xs text-[#64748B]">
+                    หากหน้างานมีเครื่องปรับอากาศที่ยังไม่อยู่ในทะเบียน กรอกข้อมูลด้านล่าง ระบบจะบันทึกงานล้างและเพิ่มเข้าทะเบียนต่อท้ายของอาคาร{' '}
+                    <span className="font-medium text-[#1E293B]">{activeBuilding || '-'}</span>
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowManualUnitForm(false)}
+                  className="h-8 px-2.5 rounded-lg border border-[#CBD5E1] text-xs text-[#475569] hover:bg-[#F8FAFC] flex items-center gap-1 whitespace-nowrap cursor-pointer shrink-0"
+                >
+                  <ChevronUp className="w-3.5 h-3.5" />
+                  <span>ซ่อนฟอร์ม</span>
+                </button>
+              </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div className="space-y-1">
@@ -680,11 +839,16 @@ export const DailyEntryView: React.FC<DailyEntryViewProps> = ({
                 เพิ่มเข้ารายการรอการบันทึก
               </button>
             </div>
-          </form>
+            </form>
+          )}
         </div>
 
         {/* Right: Staged Queue Ready to Save */}
-        <div className="xl:col-span-5 bg-white border border-[#DCE4EE] rounded-xl p-5 space-y-4 sticky top-4">
+        <div
+          className={`${
+            deviceMode === 'desktop' ? 'xl:col-span-5 sticky top-4' : ''
+          } bg-white border border-[#DCE4EE] rounded-xl p-5 space-y-4`}
+        >
           <div className="flex items-center justify-between gap-2">
             <div>
               <h2 className="text-base font-semibold text-[#1E293B]">

@@ -10,6 +10,7 @@ import {
 } from '../lib/reportCalc';
 import { THAI_MONTHS, formatThaiMonthYear, getTodayIso } from '../lib/thaiDate';
 import { exportAllReportsToSingleExcel } from '../lib/excelExport';
+import { useDeviceMode } from '../lib/deviceMode';
 import type { NavTab } from './Sidebar';
 
 interface DashboardViewProps {
@@ -31,6 +32,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onSyncSheetsNow,
   onNavigate,
 }) => {
+  const { deviceMode } = useDeviceMode();
   const today = getTodayIso();
   const initialYear = Number(today.slice(0, 4));
   const initialMonth = Number(today.slice(5, 7));
@@ -141,7 +143,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <button
             type="button"
             onClick={handleExportExcel}
-            className="h-10 px-4 rounded-lg bg-[#EAF5EF] hover:bg-[#DCEEE4] border border-[#C6E2D2] text-[#2F6A4E] text-sm font-medium transition-colors flex items-center gap-2 whitespace-nowrap cursor-pointer"
+            className={`h-10 px-4 rounded-lg bg-[#EAF5EF] hover:bg-[#DCEEE4] border border-[#C6E2D2] text-[#2F6A4E] text-sm font-medium transition-colors flex items-center justify-center gap-2 whitespace-nowrap cursor-pointer ${
+              deviceMode === 'mobile' ? 'w-full' : ''
+            }`}
           >
             <FileSpreadsheet className="w-4 h-4" />
             ดาวน์โหลด Excel ทุกรายงาน
@@ -152,7 +156,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               type="button"
               onClick={handleQuickSync}
               disabled={syncing}
-              className="h-10 px-4 rounded-lg bg-[#4A7C9B] hover:bg-[#3C6884] text-white text-sm font-medium transition-colors flex items-center gap-2 whitespace-nowrap cursor-pointer disabled:opacity-60"
+              className={`h-10 px-4 rounded-lg bg-[#4A7C9B] hover:bg-[#3C6884] text-white text-sm font-medium transition-colors flex items-center justify-center gap-2 whitespace-nowrap cursor-pointer disabled:opacity-60 ${
+                deviceMode === 'mobile' ? 'w-full' : ''
+              }`}
             >
               <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} />
               {googleToken && company.googleSheetId
@@ -166,7 +172,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       </div>
 
       {/* 4-Column KPI Strip */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+      <div
+        className={`grid gap-4 ${
+          deviceMode === 'mobile'
+            ? 'grid-cols-1'
+            : deviceMode === 'tablet'
+            ? 'grid-cols-2'
+            : 'grid-cols-1 sm:grid-cols-2 xl:grid-cols-4'
+        }`}
+      >
         <div className="bg-white border border-[#DCE4EE] rounded-xl p-5 space-y-2">
           <div className="text-xs font-medium text-[#64748B]">
             แอร์ทั้งหมดในสัญญา (ไม่รวมยกเลิก)
@@ -232,9 +246,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       </div>
 
       {/* Building Progress + Technician Productivity */}
-      <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
+      <div
+        className={`grid gap-6 ${
+          deviceMode === 'desktop' ? 'grid-cols-1 xl:grid-cols-12' : 'grid-cols-1'
+        }`}
+      >
         {/* Building Breakdown */}
-        <div className="xl:col-span-7 bg-white border border-[#DCE4EE] rounded-xl p-5 space-y-4">
+        <div
+          className={`${
+            deviceMode === 'desktop' ? 'xl:col-span-7' : ''
+          } bg-white border border-[#DCE4EE] rounded-xl p-5 space-y-4`}
+        >
           <div className="flex items-center justify-between gap-3">
             <div>
               <h2 className="text-base font-semibold text-[#1E293B]">
@@ -253,61 +275,103 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </button>
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm border-collapse">
-              <thead>
-                <tr className="border-b border-[#E2E8F0] text-xs text-[#64748B]">
-                  <th className="py-2.5 text-left font-medium">อาคาร</th>
-                  <th className="py-2.5 text-right font-medium">ในสัญญา</th>
-                  <th className="py-2.5 text-right font-medium">ล้างแล้ว</th>
-                  <th className="py-2.5 text-right font-medium">คงเหลือ</th>
-                  <th className="py-2.5 pl-4 text-left font-medium w-40">สัดส่วน</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[#F1F5F9]">
-                {floorInv.buildings.map((b) => {
-                  const cleaned = matrix.totalsByBuilding[b.building] || 0;
-                  const pct =
-                    b.totalActive > 0
-                      ? Math.min(100, Math.round((cleaned / b.totalActive) * 100))
-                      : 0;
-                  const remaining = Math.max(0, b.totalActive - cleaned);
-                  return (
-                    <tr key={b.building} className="hover:bg-[#F8FAFC]">
-                      <td className="py-3 pr-3 font-medium text-[#1E293B]">
-                        {b.building}
-                        <span className="block text-xs font-normal text-[#64748B] tabular-nums">
+          {deviceMode === 'mobile' ? (
+            <div className="space-y-2.5">
+              {floorInv.buildings.map((b) => {
+                const cleaned = matrix.totalsByBuilding[b.building] || 0;
+                const pct =
+                  b.totalActive > 0
+                    ? Math.min(100, Math.round((cleaned / b.totalActive) * 100))
+                    : 0;
+                const remaining = Math.max(0, b.totalActive - cleaned);
+                return (
+                  <div
+                    key={b.building}
+                    className="p-3 rounded-lg bg-[#F8FAFC] border border-[#E6EDF4] space-y-2"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="text-sm font-semibold text-[#1E293B]">{b.building}</div>
+                        <div className="text-xs text-[#64748B] tabular-nums">
                           ปกติ {b.normalActive} · VRF/VRV {b.vrfActive}
-                        </span>
-                      </td>
-                      <td className="py-3 text-right tabular-nums text-[#334155]">
-                        {b.totalActive}
-                      </td>
-                      <td className="py-3 text-right tabular-nums font-semibold text-[#2F6A4E]">
-                        {cleaned}
-                      </td>
-                      <td className="py-3 text-right tabular-nums text-[#64748B]">
-                        {remaining}
-                      </td>
-                      <td className="py-3 pl-4">
-                        <div className="flex items-center gap-2">
-                          <div className="flex-1 h-2 bg-[#EDF2F7] rounded-full overflow-hidden">
-                            <div
-                              className="h-full bg-[#689CB8] rounded-full"
-                              style={{ width: `${pct}%` }}
-                            />
-                          </div>
-                          <span className="text-xs tabular-nums text-[#475569] w-9 text-right">
-                            {pct}%
-                          </span>
                         </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                      </div>
+                      <span className="text-xs font-bold text-[#2F6A4E] tabular-nums">
+                        {pct}%
+                      </span>
+                    </div>
+                    <div className="w-full h-2 bg-[#E2E8F0] rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-[#689CB8] rounded-full"
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                    <div className="flex items-center justify-between text-xs text-[#475569] tabular-nums">
+                      <span>ในสัญญา {b.totalActive}</span>
+                      <span className="font-semibold text-[#2F6A4E]">ล้างแล้ว {cleaned}</span>
+                      <span>คงเหลือ {remaining}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm border-collapse">
+                <thead>
+                  <tr className="border-b border-[#E2E8F0] text-xs text-[#64748B]">
+                    <th className="py-2.5 text-left font-medium">อาคาร</th>
+                    <th className="py-2.5 text-right font-medium">ในสัญญา</th>
+                    <th className="py-2.5 text-right font-medium">ล้างแล้ว</th>
+                    <th className="py-2.5 text-right font-medium">คงเหลือ</th>
+                    <th className="py-2.5 pl-4 text-left font-medium w-40">สัดส่วน</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#F1F5F9]">
+                  {floorInv.buildings.map((b) => {
+                    const cleaned = matrix.totalsByBuilding[b.building] || 0;
+                    const pct =
+                      b.totalActive > 0
+                        ? Math.min(100, Math.round((cleaned / b.totalActive) * 100))
+                        : 0;
+                    const remaining = Math.max(0, b.totalActive - cleaned);
+                    return (
+                      <tr key={b.building} className="hover:bg-[#F8FAFC]">
+                        <td className="py-3 pr-3 font-medium text-[#1E293B]">
+                          {b.building}
+                          <span className="block text-xs font-normal text-[#64748B] tabular-nums">
+                            ปกติ {b.normalActive} · VRF/VRV {b.vrfActive}
+                          </span>
+                        </td>
+                        <td className="py-3 text-right tabular-nums text-[#334155]">
+                          {b.totalActive}
+                        </td>
+                        <td className="py-3 text-right tabular-nums font-semibold text-[#2F6A4E]">
+                          {cleaned}
+                        </td>
+                        <td className="py-3 text-right tabular-nums text-[#64748B]">
+                          {remaining}
+                        </td>
+                        <td className="py-3 pl-4">
+                          <div className="flex items-center gap-2">
+                            <div className="flex-1 h-2 bg-[#EDF2F7] rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-[#689CB8] rounded-full"
+                                style={{ width: `${pct}%` }}
+                              />
+                            </div>
+                            <span className="text-xs tabular-nums text-[#475569] w-9 text-right">
+                              {pct}%
+                            </span>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
 
         {/* Technician Performance Breakdown */}

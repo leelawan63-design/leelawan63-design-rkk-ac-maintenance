@@ -64,6 +64,15 @@ function hasPerm(user: StoredUser, perm: keyof UserPermissions): boolean {
   return Boolean(user.permissions[perm]);
 }
 
+function getBangkokYearMonth(): string {
+  const nowBangkok = new Date(Date.now() + 7 * 60 * 60 * 1000);
+  return nowBangkok.toISOString().slice(0, 7);
+}
+
+function isCurrentMonthRestricted(user: StoredUser): boolean {
+  return user.role !== 'super_admin' && Boolean(user.permissions.canModifyCurrentMonthOnly);
+}
+
 async function startServer(): Promise<void> {
   const app = express();
   app.use(express.json({ limit: '10mb' }));
@@ -894,6 +903,11 @@ async function startServer(): Promise<void> {
       return;
     }
 
+    if (isCurrentMonthRestricted(current) && !date.startsWith(getBangkokYearMonth())) {
+      res.status(403).json({ error: 'สิทธิ์ของคุณอนุญาตให้เพิ่มข้อมูลการล้างเฉพาะเดือนปัจจุบันเท่านั้น' });
+      return;
+    }
+
     if (!Array.isArray(items) || items.length === 0) {
       res.status(400).json({ error: 'กรุณาเพิ่มรายการเครื่องปรับอากาศอย่างน้อย 1 รายการ' });
       return;
@@ -1026,6 +1040,12 @@ async function startServer(): Promise<void> {
       return;
     }
 
+    const currentMonth = getBangkokYearMonth();
+    if (isCurrentMonthRestricted(current) && !log.date.startsWith(currentMonth)) {
+      res.status(403).json({ error: 'สิทธิ์ของคุณอนุญาตให้แก้ไขข้อมูลการล้างเฉพาะเดือนปัจจุบันเท่านั้น' });
+      return;
+    }
+
     const { date, status, notes, technicianId } = req.body as {
       date?: string;
       status?: CleaningStatus;
@@ -1034,6 +1054,10 @@ async function startServer(): Promise<void> {
     };
 
     if (date && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      if (isCurrentMonthRestricted(current) && !date.startsWith(currentMonth)) {
+        res.status(403).json({ error: 'สิทธิ์ของคุณอนุญาตให้ระบุวันที่เฉพาะเดือนปัจจุบันเท่านั้น' });
+        return;
+      }
       log.date = date;
     }
     if (
@@ -1070,12 +1094,16 @@ async function startServer(): Promise<void> {
 
     const { id } = req.params;
     const db = readDb();
-    const prevLen = db.logs.length;
-    db.logs = db.logs.filter((l) => l.id !== id);
-    if (db.logs.length === prevLen) {
+    const targetLog = db.logs.find((l) => l.id === id);
+    if (!targetLog) {
       res.status(404).json({ error: 'ไม่พบรายการที่ต้องการลบ' });
       return;
     }
+    if (isCurrentMonthRestricted(current) && !targetLog.date.startsWith(getBangkokYearMonth())) {
+      res.status(403).json({ error: 'สิทธิ์ของคุณอนุญาตให้ลบข้อมูลการล้างเฉพาะเดือนปัจจุบันเท่านั้น' });
+      return;
+    }
+    db.logs = db.logs.filter((l) => l.id !== id);
 
     writeDb(db);
     res.json({ ok: true });

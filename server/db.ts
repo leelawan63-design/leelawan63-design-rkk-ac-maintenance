@@ -186,6 +186,12 @@ export function normalizePermissions(role: UserRole, input?: Partial<UserPermiss
     canViewReports: typeof input.canViewReports === 'boolean' ? input.canViewReports : base.canViewReports,
     canEditHistory: typeof input.canEditHistory === 'boolean' ? input.canEditHistory : base.canEditHistory,
     canDeleteHistory: typeof input.canDeleteHistory === 'boolean' ? input.canDeleteHistory : base.canDeleteHistory,
+    canModifyCurrentMonthOnly:
+      role === 'super_admin'
+        ? false
+        : typeof input.canModifyCurrentMonthOnly === 'boolean'
+          ? input.canModifyCurrentMonthOnly
+          : base.canModifyCurrentMonthOnly,
     canManageInventory: typeof input.canManageInventory === 'boolean' ? input.canManageInventory : base.canManageInventory,
     canManageTechnicians: typeof input.canManageTechnicians === 'boolean' ? input.canManageTechnicians : base.canManageTechnicians,
     canSyncSheets: typeof input.canSyncSheets === 'boolean' ? input.canSyncSheets : base.canSyncSheets,

@@ -6,6 +6,7 @@ export interface UserPermissions {
   canViewReports: boolean;
   canEditHistory: boolean;
   canDeleteHistory: boolean;
+  canModifyCurrentMonthOnly: boolean;
   canManageInventory: boolean;
   canManageTechnicians: boolean;
   canSyncSheets: boolean;
@@ -133,6 +134,7 @@ export const DEFAULT_PERMISSIONS_BY_ROLE: Record<UserRole, UserPermissions> = {
     canViewReports: true,
     canEditHistory: true,
     canDeleteHistory: true,
+    canModifyCurrentMonthOnly: false,
     canManageInventory: true,
     canManageTechnicians: true,
     canSyncSheets: true,
@@ -145,6 +147,7 @@ export const DEFAULT_PERMISSIONS_BY_ROLE: Record<UserRole, UserPermissions> = {
     canViewReports: true,
     canEditHistory: true,
     canDeleteHistory: true,
+    canModifyCurrentMonthOnly: false,
     canManageInventory: true,
     canManageTechnicians: true,
     canSyncSheets: true,
@@ -157,6 +160,7 @@ export const DEFAULT_PERMISSIONS_BY_ROLE: Record<UserRole, UserPermissions> = {
     canViewReports: true,
     canEditHistory: false,
     canDeleteHistory: false,
+    canModifyCurrentMonthOnly: false,
     canManageInventory: false,
     canManageTechnicians: false,
     canSyncSheets: false,

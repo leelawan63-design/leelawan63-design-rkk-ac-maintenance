@@ -178,6 +178,12 @@ function normalizePermissions(
       typeof input.canManageUsers === 'boolean' ? input.canManageUsers : base.canManageUsers,
     canEditCompany:
       typeof input.canEditCompany === 'boolean' ? input.canEditCompany : base.canEditCompany,
+    canModifyCurrentMonthOnly:
+      role === 'super_admin'
+        ? false
+        : typeof input.canModifyCurrentMonthOnly === 'boolean'
+        ? input.canModifyCurrentMonthOnly
+        : base.canModifyCurrentMonthOnly,
   };
 }
 

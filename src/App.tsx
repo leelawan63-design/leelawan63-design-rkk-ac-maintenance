@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Menu } from 'lucide-react';
+import { Menu, Monitor, Smartphone, Tablet } from 'lucide-react';
 import type {
   ACUnit,
   BatchLogItemInput,
@@ -9,6 +9,7 @@ import type {
   UserAccount,
 } from './types';
 import { api, getStoredToken, setStoredToken, type TechnicianOption } from './lib/api';
+import { DeviceModeProvider, useDeviceMode, type DeviceMode } from './lib/deviceMode';
 import {
   getGoogleAccessToken,
   initGoogleSheetsAuth,
@@ -24,12 +25,13 @@ import {
 } from './lib/googleSheetsSync';
 import { getTodayIso } from './lib/thaiDate';
 import { LoginPage } from './components/LoginPage';
-import { Sidebar, type NavTab } from './components/Sidebar';
+import { getVisibleNavItems, Sidebar, type NavTab } from './components/Sidebar';
 import { DashboardView } from './components/DashboardView';
 import { DailyEntryView } from './components/DailyEntryView';
 import { HistoryView } from './components/HistoryView';
 import { InventoryView } from './components/InventoryView';
 import { ReportsPrintView } from './components/ReportsPrintView';
+import { UserGuideView } from './components/UserGuideView';
 import { GoogleSheetsView } from './components/GoogleSheetsView';
 import { AdminSettingsView } from './components/AdminSettingsView';
 import { TechniciansView } from './components/TechniciansView';
@@ -53,7 +55,8 @@ function getInitialTab(user: UserAccount): NavTab {
   return 'daily';
 }
 
-export default function App() {
+function AppContent() {
+  const { deviceMode, setDeviceMode } = useDeviceMode();
   const [booting, setBooting] = useState(true);
   const [publicCompany, setPublicCompany] = useState(DEFAULT_PUBLIC_COMPANY);
   const [user, setUser] = useState<UserAccount | null>(null);
@@ -381,9 +384,21 @@ export default function App() {
     inventory: 'ทะเบียนแอร์ทุกอาคาร',
     technicians: 'รายชื่อช่างเทคนิค',
     reports: 'รายงานและพิมพ์เอกสาร',
+    guide: 'วิธีใช้งานระบบ',
     sheets: 'ซิงค์ Google Sheets',
     settings: 'ตั้งค่าบริษัทและสิทธิ์ผู้ใช้',
   };
+
+  const visibleNavItems = getVisibleNavItems(user);
+  const mobileQuickTabs = visibleNavItems
+    .filter((i) => ['daily', 'history', 'reports', 'guide', 'dashboard'].includes(i.id))
+    .slice(0, 4);
+
+  const deviceOptions: Array<{ id: DeviceMode; label: string; icon: React.ReactNode }> = [
+    { id: 'desktop', label: 'คอมฯ', icon: <Monitor className="w-3.5 h-3.5" /> },
+    { id: 'tablet', label: 'แท็บเล็ต', icon: <Tablet className="w-3.5 h-3.5" /> },
+    { id: 'mobile', label: 'มือถือ', icon: <Smartphone className="w-3.5 h-3.5" /> },
+  ];
 
   return (
     <div className="min-h-screen bg-[#F6F8FA] flex print-root">
@@ -399,12 +414,14 @@ export default function App() {
 
       <div className="flex-1 min-w-0 flex flex-col print-main-col">
         {/* Top Bar (hidden when printing) */}
-        <header className="h-14 bg-white border-b border-[#DCE4EE] px-4 sm:px-6 flex items-center justify-between gap-4 shrink-0 no-print">
-          <div className="flex items-center gap-3 min-w-0">
+        <header className="h-14 bg-white border-b border-[#DCE4EE] px-3 sm:px-6 flex items-center justify-between gap-2 sm:gap-4 shrink-0 no-print">
+          <div className="flex items-center gap-2.5 min-w-0">
             <button
               type="button"
               onClick={() => setMobileOpen(true)}
-              className="lg:hidden p-2 -ml-2 rounded-lg text-[#475569] hover:bg-[#F1F5F9]"
+              className={`${
+                deviceMode === 'desktop' ? 'lg:hidden' : ''
+              } p-2 -ml-1 rounded-lg text-[#475569] hover:bg-[#F1F5F9] cursor-pointer`}
               aria-label="เปิดเมนู"
             >
               <Menu className="w-5 h-5" />
@@ -414,20 +431,85 @@ export default function App() {
             </div>
           </div>
 
-          <div className="flex items-center gap-4 text-xs text-[#64748B] shrink-0">
-            {syncNotice && (
+          <div className="flex items-center gap-2 sm:gap-3 text-xs text-[#64748B] shrink-0">
+            {syncNotice && deviceMode !== 'mobile' && (
               <span className="hidden md:inline text-[#2F6A4E] bg-[#ECF6F1] px-2.5 py-1 rounded-md">
                 {syncNotice}
               </span>
             )}
-            <span className="hidden sm:inline truncate max-w-[240px]">
-              ผู้ใช้งาน: <strong className="text-[#1E293B]">{user.fullName}</strong>
-            </span>
+
+            {/* Quick Device Mode Switcher */}
+            <div
+              className="inline-flex items-center p-0.5 rounded-lg bg-[#F1F5F9] border border-[#DCE4EE]"
+              role="group"
+              aria-label="โหมดการแสดงผลตามเครื่องที่ใช้งาน"
+            >
+              {deviceOptions.map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => setDeviceMode(opt.id)}
+                  title={`โหมด${opt.label}`}
+                  className={`flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium transition-colors cursor-pointer ${
+                    deviceMode === opt.id
+                      ? 'bg-white text-[#2F5A78] shadow-xs'
+                      : 'text-[#64748B] hover:text-[#1E293B]'
+                  }`}
+                >
+                  {opt.icon}
+                  <span className="hidden sm:inline">{opt.label}</span>
+                </button>
+              ))}
+            </div>
+
+            {deviceMode !== 'mobile' && (
+              <span className="hidden sm:inline truncate max-w-[200px]">
+                ผู้ใช้งาน: <strong className="text-[#1E293B]">{user.fullName}</strong>
+              </span>
+            )}
           </div>
         </header>
 
+        {/* Tablet Quick Navigation Strip */}
+        {deviceMode === 'tablet' && (
+          <div className="bg-white border-b border-[#E2E8F0] px-4 py-2 flex items-center gap-1.5 overflow-x-auto no-print">
+            {visibleNavItems.map((item) => {
+              const active = activeTab === item.id;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => setActiveTab(item.id)}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium whitespace-nowrap transition-colors cursor-pointer ${
+                    active
+                      ? 'bg-[#EAF2F8] text-[#2F5A78]'
+                      : 'text-[#475569] hover:bg-[#F4F7FA]'
+                  }`}
+                >
+                  {item.icon}
+                  <span>{item.shortLabel}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
         {/* Main Viewport */}
-        <main className="flex-1 p-4 sm:p-6 max-w-[1400px] w-full mx-auto">
+        <main
+          className={`flex-1 w-full mx-auto ${
+            deviceMode === 'mobile'
+              ? 'p-3 pb-24 max-w-lg'
+              : deviceMode === 'tablet'
+                ? 'p-4 max-w-4xl'
+                : 'p-4 sm:p-6 max-w-[1400px]'
+          }`}
+        >
+          {syncNotice && deviceMode === 'mobile' && (
+            <div className="mb-3 px-3 py-2 rounded-lg text-xs text-[#2F6A4E] bg-[#ECF6F1] border border-[#C6E2D2] no-print">
+              {syncNotice}
+            </div>
+          )}
+
           {activeTab === 'dashboard' && (
             <DashboardView
               user={user}
@@ -484,6 +566,8 @@ export default function App() {
             <ReportsPrintView company={company} units={units} logs={logs} />
           )}
 
+          {activeTab === 'guide' && <UserGuideView />}
+
           {activeTab === 'sheets' && (
             <GoogleSheetsView
               company={company}
@@ -508,6 +592,47 @@ export default function App() {
           )}
         </main>
       </div>
+
+      {/* Mobile Bottom Navigation Bar */}
+      {deviceMode === 'mobile' && (
+        <nav
+          aria-label="เมนูด่วนสำหรับมือถือ"
+          className="fixed bottom-0 inset-x-0 z-40 bg-white border-t border-[#DCE4EE] px-1 py-1.5 flex items-center justify-around shadow-sm no-print"
+        >
+          {mobileQuickTabs.map((item) => {
+            const active = activeTab === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setActiveTab(item.id)}
+                className={`flex flex-col items-center justify-center gap-0.5 px-2 py-1 rounded-lg min-w-[58px] text-[11px] font-medium cursor-pointer ${
+                  active ? 'text-[#2F5A78] bg-[#EAF2F8]' : 'text-[#64748B]'
+                }`}
+              >
+                {item.icon}
+                <span className="truncate max-w-[64px]">{item.shortLabel}</span>
+              </button>
+            );
+          })}
+          <button
+            type="button"
+            onClick={() => setMobileOpen(true)}
+            className="flex flex-col items-center justify-center gap-0.5 px-2 py-1 rounded-lg min-w-[58px] text-[11px] font-medium text-[#64748B] cursor-pointer"
+          >
+            <Menu className="w-4 h-4" />
+            <span>เมนูทั้งหมด</span>
+          </button>
+        </nav>
+      )}
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <DeviceModeProvider>
+      <AppContent />
+    </DeviceModeProvider>
   );
 }

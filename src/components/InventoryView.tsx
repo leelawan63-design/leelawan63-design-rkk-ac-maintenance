@@ -14,6 +14,7 @@ import {
   downloadInventoryImportTemplate,
   parseInventoryExcelFile,
 } from '../lib/excelExport';
+import { useDeviceMode } from '../lib/deviceMode';
 
 interface InventoryViewProps {
   units: ACUnit[];
@@ -33,6 +34,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   onDeleteUnit,
   onImportUnits,
 }) => {
+  const { deviceMode } = useDeviceMode();
   const [subTab, setSubTab] = useState<'list' | 'summary'>('list');
   const [buildingFilter, setBuildingFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'cancelled'>('all');
@@ -288,7 +290,11 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           </div>
 
           {subTab === 'list' && (
-            <div className="flex flex-wrap items-center gap-2">
+            <div
+              className={`flex gap-2 ${
+                deviceMode === 'mobile' ? 'flex-col w-full' : 'flex-wrap items-center'
+              }`}
+            >
               <div className="relative">
                 <Search className="w-3.5 h-3.5 text-[#94A3B8] absolute left-2.5 top-1/2 -translate-y-1/2" />
                 <input
@@ -296,30 +302,34 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   placeholder="ค้นหาห้อง / รหัสเครื่อง..."
-                  className="h-9 pl-8 pr-3 rounded-lg border border-[#CBD5E1] text-xs"
+                  className={`h-9 pl-8 pr-3 rounded-lg border border-[#CBD5E1] text-xs ${
+                    deviceMode === 'mobile' ? 'w-full' : ''
+                  }`}
                 />
               </div>
-              <select
-                value={buildingFilter}
-                onChange={(e) => setBuildingFilter(e.target.value)}
-                className="h-9 px-2.5 rounded-lg border border-[#CBD5E1] bg-white text-xs"
-              >
-                <option value="all">ทุกอาคาร</option>
-                {contract.buildings.map((b) => (
-                  <option key={b} value={b}>
-                    {b}
-                  </option>
-                ))}
-              </select>
-              <select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value as 'all' | 'active' | 'cancelled')}
-                className="h-9 px-2.5 rounded-lg border border-[#CBD5E1] bg-white text-xs"
-              >
-                <option value="all">ทุกสถานะ</option>
-                <option value="active">ใช้งานในสัญญา</option>
-                <option value="cancelled">ยกเลิก (ไม่นับรวม)</option>
-              </select>
+              <div className={deviceMode === 'mobile' ? 'grid grid-cols-2 gap-2' : 'flex gap-2'}>
+                <select
+                  value={buildingFilter}
+                  onChange={(e) => setBuildingFilter(e.target.value)}
+                  className="h-9 px-2.5 rounded-lg border border-[#CBD5E1] bg-white text-xs w-full sm:w-auto"
+                >
+                  <option value="all">ทุกอาคาร</option>
+                  {contract.buildings.map((b) => (
+                    <option key={b} value={b}>
+                      {b}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value as 'all' | 'active' | 'cancelled')}
+                  className="h-9 px-2.5 rounded-lg border border-[#CBD5E1] bg-white text-xs w-full sm:w-auto"
+                >
+                  <option value="all">ทุกสถานะ</option>
+                  <option value="active">ใช้งานในสัญญา</option>
+                  <option value="cancelled">ยกเลิก (ไม่นับรวม)</option>
+                </select>
+              </div>
             </div>
           )}
         </div>
@@ -338,84 +348,154 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       )}
 
       {subTab === 'list' ? (
-        <div className="bg-white border border-[#DCE4EE] rounded-xl overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm border-collapse">
-              <thead className="bg-[#F4F7FA] border-b border-[#DCE4EE] text-xs text-[#475569]">
-                <tr>
-                  <th className="py-3 px-4 text-left font-semibold">ลำดับ</th>
-                  <th className="py-3 px-4 text-left font-semibold">อาคาร</th>
-                  <th className="py-3 px-4 text-left font-semibold">ชั้น</th>
-                  <th className="py-3 px-4 text-left font-semibold">ห้อง</th>
-                  <th className="py-3 px-4 text-left font-semibold">หมายเลขเครื่อง</th>
-                  <th className="py-3 px-4 text-left font-semibold">ประเภทแอร์</th>
-                  <th className="py-3 px-4 text-left font-semibold">รุ่น / BTU / ยี่ห้อ / ลักษณะ</th>
-                  <th className="py-3 px-4 text-left font-semibold">สถานะ</th>
-                  <th className="py-3 px-4 text-right font-semibold">จัดการ</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[#EEF2F6]">
-                {filteredUnits.map((u, idx) => (
-                  <tr
-                    key={u.id}
-                    className={
-                      u.status === 'cancelled'
-                        ? 'bg-[#F8FAFC] text-[#94A3B8]'
-                        : 'hover:bg-[#F8FAFC]'
-                    }
-                  >
-                    <td className="py-2.5 px-4 tabular-nums text-xs text-[#64748B]">{idx + 1}</td>
-                    <td className="py-2.5 px-4 font-medium">{u.building}</td>
-                    <td className="py-2.5 px-4 whitespace-nowrap">{u.floor}</td>
-                    <td className="py-2.5 px-4">{u.room}</td>
-                    <td className="py-2.5 px-4 font-mono-tabular font-medium text-[#3B6684] whitespace-nowrap">
-                      {u.unitCode}
-                    </td>
-                    <td className="py-2.5 px-4 whitespace-nowrap text-xs">
-                      {u.acType === 'vrf' ? 'VRF / VRV' : 'แอร์ปกติ'}
-                    </td>
-                    <td className="py-2.5 px-4 text-xs text-[#64748B]">
-                      {[u.model, u.btu ? `${u.btu} BTU` : '', u.brand, u.installType]
-                        .filter(Boolean)
-                        .join(' · ') || '-'}
-                    </td>
-                    <td className="py-2.5 px-4 whitespace-nowrap">
-                      <span
-                        className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${
-                          u.status === 'cancelled'
-                            ? 'bg-[#E2E8F0] text-[#64748B]'
-                            : 'bg-[#ECF6F1] text-[#25593E]'
-                        }`}
-                      >
-                        {u.status === 'cancelled' ? 'ยกเลิก' : 'ใช้งาน'}
-                      </span>
-                    </td>
-                    <td className="py-2.5 px-4 text-right whitespace-nowrap">
-                      <div className="inline-flex items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() => openEditModal(u)}
-                          className="p-1.5 rounded-md text-[#4A7C9B] hover:bg-[#EAF2F8] cursor-pointer"
-                          aria-label="แก้ไข"
-                        >
-                          <Pencil className="w-4 h-4" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setDeletingUnit(u)}
-                          className="p-1.5 rounded-md text-[#9D3E4E] hover:bg-[#FDF0F2] cursor-pointer"
-                          aria-label="ลบ"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+        deviceMode === 'mobile' ? (
+          <div className="space-y-2.5">
+            {filteredUnits.length === 0 ? (
+              <div className="bg-white border border-[#DCE4EE] rounded-xl py-10 text-center text-sm text-[#64748B]">
+                ไม่พบเครื่องปรับอากาศตามเงื่อนไขที่ค้นหา
+              </div>
+            ) : (
+              filteredUnits.map((u) => (
+                <div
+                  key={u.id}
+                  className={`rounded-xl border border-[#DCE4EE] p-3.5 space-y-2 ${
+                    u.status === 'cancelled' ? 'bg-[#F8FAFC] opacity-75' : 'bg-white'
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-mono-tabular font-semibold text-sm text-[#3B6684]">
+                          {u.unitCode}
+                        </span>
+                        <span className="text-[11px] px-2 py-0.5 rounded bg-[#F1F5F9] text-[#475569]">
+                          {u.acType === 'vrf' ? 'VRF / VRV' : 'แอร์ปกติ'}
+                        </span>
                       </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                      <div className="text-sm font-medium text-[#1E293B] mt-0.5">{u.room}</div>
+                      <div className="text-xs text-[#64748B]">
+                        {u.building} · ชั้น {u.floor}
+                      </div>
+                    </div>
+                    <span
+                      className={`inline-block px-2 py-0.5 rounded text-[11px] font-medium shrink-0 ${
+                        u.status === 'cancelled'
+                          ? 'bg-[#E2E8F0] text-[#64748B]'
+                          : 'bg-[#ECF6F1] text-[#25593E]'
+                      }`}
+                    >
+                      {u.status === 'cancelled' ? 'ยกเลิก' : 'ใช้งาน'}
+                    </span>
+                  </div>
+
+                  <div className="text-xs text-[#64748B]">
+                    {[u.model, u.btu ? `${u.btu} BTU` : '', u.brand, u.installType]
+                      .filter(Boolean)
+                      .join(' · ') || 'ไม่ระบุรายละเอียดรุ่น/ขนาด'}
+                  </div>
+
+                  <div className="flex justify-end gap-1.5 pt-2 border-t border-[#EEF2F6]">
+                    <button
+                      type="button"
+                      onClick={() => openEditModal(u)}
+                      className="h-8 px-2.5 rounded-lg border border-[#DCE4EE] text-[#4A7C9B] bg-[#F8FAFC] text-xs font-medium inline-flex items-center gap-1 cursor-pointer"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                      แก้ไข
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDeletingUnit(u)}
+                      className="h-8 px-2.5 rounded-lg border border-[#F3CCD3] text-[#9D3E4E] bg-[#FDF0F2] text-xs font-medium inline-flex items-center gap-1 cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      ลบ
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
           </div>
-        </div>
+        ) : (
+          <div className="bg-white border border-[#DCE4EE] rounded-xl overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm border-collapse">
+                <thead className="bg-[#F4F7FA] border-b border-[#DCE4EE] text-xs text-[#475569]">
+                  <tr>
+                    <th className="py-3 px-4 text-left font-semibold">ลำดับ</th>
+                    <th className="py-3 px-4 text-left font-semibold">อาคาร</th>
+                    <th className="py-3 px-4 text-left font-semibold">ชั้น</th>
+                    <th className="py-3 px-4 text-left font-semibold">ห้อง</th>
+                    <th className="py-3 px-4 text-left font-semibold">หมายเลขเครื่อง</th>
+                    <th className="py-3 px-4 text-left font-semibold">ประเภทแอร์</th>
+                    <th className="py-3 px-4 text-left font-semibold">รุ่น / BTU / ยี่ห้อ / ลักษณะ</th>
+                    <th className="py-3 px-4 text-left font-semibold">สถานะ</th>
+                    <th className="py-3 px-4 text-right font-semibold">จัดการ</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#EEF2F6]">
+                  {filteredUnits.map((u, idx) => (
+                    <tr
+                      key={u.id}
+                      className={
+                        u.status === 'cancelled'
+                          ? 'bg-[#F8FAFC] text-[#94A3B8]'
+                          : 'hover:bg-[#F8FAFC]'
+                      }
+                    >
+                      <td className="py-2.5 px-4 tabular-nums text-xs text-[#64748B]">{idx + 1}</td>
+                      <td className="py-2.5 px-4 font-medium">{u.building}</td>
+                      <td className="py-2.5 px-4 whitespace-nowrap">{u.floor}</td>
+                      <td className="py-2.5 px-4">{u.room}</td>
+                      <td className="py-2.5 px-4 font-mono-tabular font-medium text-[#3B6684] whitespace-nowrap">
+                        {u.unitCode}
+                      </td>
+                      <td className="py-2.5 px-4 whitespace-nowrap text-xs">
+                        {u.acType === 'vrf' ? 'VRF / VRV' : 'แอร์ปกติ'}
+                      </td>
+                      <td className="py-2.5 px-4 text-xs text-[#64748B]">
+                        {[u.model, u.btu ? `${u.btu} BTU` : '', u.brand, u.installType]
+                          .filter(Boolean)
+                          .join(' · ') || '-'}
+                      </td>
+                      <td className="py-2.5 px-4 whitespace-nowrap">
+                        <span
+                          className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${
+                            u.status === 'cancelled'
+                              ? 'bg-[#E2E8F0] text-[#64748B]'
+                              : 'bg-[#ECF6F1] text-[#25593E]'
+                          }`}
+                        >
+                          {u.status === 'cancelled' ? 'ยกเลิก' : 'ใช้งาน'}
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-4 text-right whitespace-nowrap">
+                        <div className="inline-flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => openEditModal(u)}
+                            className="p-1.5 rounded-md text-[#4A7C9B] hover:bg-[#EAF2F8] cursor-pointer"
+                            aria-label="แก้ไข"
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setDeletingUnit(u)}
+                            className="p-1.5 rounded-md text-[#9D3E4E] hover:bg-[#FDF0F2] cursor-pointer"
+                            aria-label="ลบ"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )
       ) : (
         <div className="bg-white border border-[#DCE4EE] rounded-xl overflow-hidden">
           <div className="overflow-x-auto">
