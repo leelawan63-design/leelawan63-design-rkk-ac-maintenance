@@ -8,6 +8,7 @@ import {
   computeMonthlyCleaningMatrix,
   computeTechnicianStats,
   computeUncleanedSummary,
+  computeUnrecordedUnits,
   formatReportBuildingName,
   formatReportNotes,
   formatReportTechnicianName,
@@ -235,6 +236,39 @@ export function exportAllReportsToSingleExcel(params: ExportAllReportsParams): v
   const wsMonthlyCleaned = XLSX.utils.aoa_to_sheet(sMonthlyCleaned);
   applyExcelPageSetup(wsMonthlyCleaned, [8, 14, 22, 8, 24, 15, 13, 20, 20]);
   XLSX.utils.book_append_sheet(wb, wsMonthlyCleaned, 'รายการเข้าล้างแล้วรายเดือน');
+
+  // Sheet 3b: เครื่องที่ยังไม่ได้บันทึกการล้าง
+  const targetMonthsForUnrecorded =
+    combineMajorCycle && majorCycle ? majorCycle.months : [month];
+  const unrecordedList = computeUnrecordedUnits(logs, units, year, targetMonthsForUnrecorded);
+  const sUnrecorded: (string | number)[][] = [
+    [
+      `บัญชีรายการเครื่องปรับอากาศที่ยังไม่ได้บันทึกการล้าง ${
+        combineMajorCycle && majorCycle
+          ? `ประจำรอบ ${majorCycle.label} พ.ศ. ${year + 543}`
+          : `ประจำเดือน ${formatThaiMonthYear(year, month)}`
+      } (${cycleTypeLabel})`,
+    ],
+    [`${company.name} | โทร ${company.phone}`],
+    [],
+    ['ลำดับ', 'อาคาร', 'ชั้น', 'ห้อง', 'หมายเลขเครื่อง', 'ประเภทแอร์', 'รุ่น / BTU', 'หมายเหตุ'],
+  ];
+  unrecordedList.forEach((u, idx) => {
+    const spec = [u.model, u.btu ? `${u.btu} BTU` : ''].filter(Boolean).join(' · ');
+    sUnrecorded.push([
+      idx + 1,
+      formatReportBuildingName(u.building),
+      u.floor,
+      u.room,
+      u.unitCode,
+      u.acType === 'vrf' ? 'VRF / VRV' : 'แอร์ปกติ',
+      spec || '-',
+      formatReportNotes(u.notes) || '-',
+    ]);
+  });
+  const wsUnrecorded = XLSX.utils.aoa_to_sheet(sUnrecorded);
+  applyExcelPageSetup(wsUnrecorded, [8, 22, 8, 24, 15, 13, 22, 20]);
+  XLSX.utils.book_append_sheet(wb, wsUnrecorded, 'เครื่องยังไม่บันทึกการล้าง');
 
   // Sheet 4: รายการเข้าล้างรายวัน
   const s3Data: (string | number)[][] = [

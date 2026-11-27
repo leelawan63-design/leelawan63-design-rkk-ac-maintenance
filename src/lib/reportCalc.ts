@@ -598,3 +598,47 @@ export function computeTechnicianStats(
     }))
     .sort((a, b) => b.cleanedCount - a.cleanedCount);
 }
+
+export function computeUnrecordedUnits(
+  logs: CleaningLog[],
+  units: ACUnit[],
+  year: number,
+  months: number[]
+): ACUnit[] {
+  const prefixes = new Set(
+    months.map((m) => `${year}-${String(m).padStart(2, '0')}`)
+  );
+  const loggedIds = new Set<string>();
+  const loggedKeys = new Set<string>();
+
+  for (const log of logs) {
+    if (!prefixes.has(log.date.slice(0, 7))) continue;
+    loggedIds.add(log.unitId);
+    loggedKeys.add(
+      `${formatReportBuildingName(log.building)}::${log.unitCode.trim().toLowerCase()}`
+    );
+  }
+
+  return units
+    .filter((u) => {
+      if (u.status === 'cancelled') return false;
+      if (loggedIds.has(u.id)) return false;
+      const key = `${formatReportBuildingName(u.building)}::${u.unitCode.trim().toLowerCase()}`;
+      if (loggedKeys.has(key)) return false;
+      return true;
+    })
+    .sort((a, b) => {
+      const bCmp = formatReportBuildingName(a.building).localeCompare(
+        formatReportBuildingName(b.building),
+        'th',
+        { numeric: true }
+      );
+      if (bCmp !== 0) return bCmp;
+      const fCmp = a.floor.localeCompare(b.floor, 'th', { numeric: true });
+      if (fCmp !== 0) return fCmp;
+      const rCmp = a.room.localeCompare(b.room, 'th', { numeric: true });
+      if (rCmp !== 0) return rCmp;
+      return a.unitCode.localeCompare(b.unitCode, 'th', { numeric: true });
+    });
+}
+

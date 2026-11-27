@@ -9,6 +9,7 @@ import {
   computeMonthlyCleaningMatrix,
   computeTechnicianStats,
   computeUncleanedSummary,
+  computeUnrecordedUnits,
   formatReportBuildingName,
   formatReportNotes,
   formatReportTechnicianFirstName,
@@ -36,6 +37,7 @@ type ReportTab =
   | 'monthly'
   | 'monthly_cleaned'
   | 'uncleaned_filtered'
+  | 'unrecorded_units'
   | 'daily_signoff'
   | 'building_floors'
   | 'technicians';
@@ -53,9 +55,10 @@ const REPORT_TAB_TITLES: Record<ReportTab, string> = {
   monthly: '1. รายงานสรุปประจำเดือน / ประจำปี',
   monthly_cleaned: '2. บัญชีรายการเข้าล้างแล้วรายเดือน',
   uncleaned_filtered: '3. รายงานไม่ได้เข้าล้าง (แยกประเภท)',
-  daily_signoff: '4. บัญชีรายการเข้าล้างรายวัน (เซ็นตรวจรับ)',
-  building_floors: '5. สรุปจำนวนแอร์ทุกชั้นทุกอาคาร',
-  technicians: '6. รายงานผลงานช่างเทคนิค',
+  unrecorded_units: '4. รายงานเครื่องที่ยังไม่ได้บันทึกการล้าง',
+  daily_signoff: '5. บัญชีรายการเข้าล้างรายวัน (เซ็นตรวจรับ)',
+  building_floors: '6. สรุปจำนวนแอร์ทุกชั้นทุกอาคาร',
+  technicians: '7. รายงานผลงานช่างเทคนิค',
 };
 
 const UNCLEANED_FILTER_LABELS: Record<UncleanedFilter, string> = {
@@ -110,6 +113,7 @@ export const ReportsPrintView: React.FC<ReportsPrintViewProps> = ({
   const [showMonthlySection2, setShowMonthlySection2] = useState(true);
   const [showMonthlySection3, setShowMonthlySection3] = useState(true);
   const [showMonthlyTechSummary, setShowMonthlyTechSummary] = useState(true);
+  const [showUncleanedRecorderCol, setShowUncleanedRecorderCol] = useState(true);
   const [showDailyTechnicianCol, setShowDailyTechnicianCol] = useState(true);
 
   const [printFallbackUrl, setPrintFallbackUrl] = useState<string | null>(null);
@@ -149,6 +153,7 @@ export const ReportsPrintView: React.FC<ReportsPrintViewProps> = ({
     showMonthlySection2,
     showMonthlySection3,
     showMonthlyTechSummary,
+    showUncleanedRecorderCol,
     showDailyTechnicianCol,
     senderName,
     inspectorName,
@@ -157,7 +162,8 @@ export const ReportsPrintView: React.FC<ReportsPrintViewProps> = ({
   const isMonthBasedReport =
     activeReport === 'monthly' ||
     activeReport === 'monthly_cleaned' ||
-    activeReport === 'uncleaned_filtered';
+    activeReport === 'uncleaned_filtered' ||
+    activeReport === 'unrecorded_units';
 
   const majorCycle = useMemo(() => getMajorCleaningCycle(selectedMonth), [selectedMonth]);
   const cleaningTypeLabel = useMemo(
@@ -292,6 +298,58 @@ export const ReportsPrintView: React.FC<ReportsPrintViewProps> = ({
 
     return groups;
   }, [monthlyCleanedLogs, activeUnitCountsByBuilding]);
+
+  const unrecordedMonths = useMemo(
+    () => (isCombinedMajor && majorCycle ? majorCycle.months : [selectedMonth]),
+    [isCombinedMajor, majorCycle, selectedMonth]
+  );
+
+  const unrecordedUnits = useMemo(() => {
+    return computeUnrecordedUnits(logs, units, selectedYear, unrecordedMonths).filter((u) => {
+      if (selectedBuilding !== 'all' && u.building !== selectedBuilding) return false;
+      if (selectedAcType !== 'all' && u.acType !== selectedAcType) return false;
+      return true;
+    });
+  }, [logs, units, selectedYear, unrecordedMonths, selectedBuilding, selectedAcType]);
+
+  const unrecordedTotalScopeCount = useMemo(() => {
+    return units.filter((u) => {
+      if (u.status === 'cancelled') return false;
+      if (selectedBuilding !== 'all' && u.building !== selectedBuilding) return false;
+      if (selectedAcType !== 'all' && u.acType !== selectedAcType) return false;
+      return true;
+    }).length;
+  }, [units, selectedBuilding, selectedAcType]);
+
+  const unrecordedGroups = useMemo(() => {
+    const groups: Array<{
+      buildingName: string;
+      totalInBuilding: number;
+      normalCount: number;
+      vrfCount: number;
+      items: Array<{ unit: ACUnit; rowNumber: number }>;
+    }> = [];
+    let current: (typeof groups)[number] | null = null;
+
+    unrecordedUnits.forEach((unit, idx) => {
+      const buildingName = formatReportBuildingName(unit.building);
+      if (!current || current.buildingName !== buildingName) {
+        current = {
+          buildingName,
+          totalInBuilding: activeUnitCountsByBuilding[buildingName] || 0,
+          normalCount: 0,
+          vrfCount: 0,
+          items: [],
+        };
+        groups.push(current);
+      }
+      if (unit.acType === 'vrf') current.vrfCount++;
+      else current.normalCount++;
+      current.items.push({ unit, rowNumber: idx + 1 });
+    });
+
+    return groups;
+  }, [unrecordedUnits, activeUnitCountsByBuilding]);
 
   const effectiveDailyStart =
     dailyDateMode === 'single'
@@ -858,7 +916,9 @@ export const ReportsPrintView: React.FC<ReportsPrintViewProps> = ({
             </div>
           )}
 
-          {(activeReport === 'monthly_cleaned' || activeReport === 'uncleaned_filtered') && (
+          {(activeReport === 'monthly_cleaned' ||
+            activeReport === 'uncleaned_filtered' ||
+            activeReport === 'unrecorded_units') && (
             <div className="space-y-1">
               <label className="block text-xs text-[#64748B]">อาคาร</label>
               <select
@@ -876,7 +936,7 @@ export const ReportsPrintView: React.FC<ReportsPrintViewProps> = ({
             </div>
           )}
 
-          {activeReport === 'monthly_cleaned' && (
+          {(activeReport === 'monthly_cleaned' || activeReport === 'unrecorded_units') && (
             <div className="space-y-1">
               <label className="block text-xs text-[#64748B]">ประเภทแอร์</label>
               <select
@@ -1021,6 +1081,20 @@ export const ReportsPrintView: React.FC<ReportsPrintViewProps> = ({
             />
           </div>
         </div>
+
+        {activeReport === 'uncleaned_filtered' && (
+          <div className="pt-3 border-t border-[#E8EEF4] flex flex-wrap items-center justify-between gap-2">
+            <label className="inline-flex items-center gap-2 text-xs text-[#334155] cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={showUncleanedRecorderCol}
+                onChange={(e) => setShowUncleanedRecorderCol(e.target.checked)}
+                className="w-4 h-4 rounded border-[#CBD5E1] text-[#4A7C9B] focus:ring-[#4A7C9B]"
+              />
+              <span>แสดงคอลัมน์ &quot;ผู้บันทึก&quot; ในตารางรายงาน</span>
+            </label>
+          </div>
+        )}
 
         {activeReport === 'daily_signoff' && (
           <div className="pt-3 border-t border-[#E8EEF4] flex flex-wrap items-center justify-between gap-2">
@@ -1947,19 +2021,54 @@ export const ReportsPrintView: React.FC<ReportsPrintViewProps> = ({
                 <tr className="bg-[#EEF4F9] text-[#1E293B]">
                   <th className="border border-[#CBD5E1] py-1 px-1 text-center w-[5%]">ลำดับ</th>
                   <th className="border border-[#CBD5E1] py-1 px-1 text-left w-[10%]">วันที่</th>
-                  <th className="border border-[#CBD5E1] py-1 px-1 text-left w-[16%]">อาคาร / ชั้น</th>
-                  <th className="border border-[#CBD5E1] py-1 px-1 text-left w-[16%]">ห้อง</th>
-                  <th className="border border-[#CBD5E1] py-1 px-1 text-left w-[10%]">หมายเลขเครื่อง</th>
+                  <th
+                    className={`border border-[#CBD5E1] py-1 px-1 text-left ${
+                      showUncleanedRecorderCol ? 'w-[16%]' : 'w-[17%]'
+                    }`}
+                  >
+                    อาคาร / ชั้น
+                  </th>
+                  <th
+                    className={`border border-[#CBD5E1] py-1 px-1 text-left ${
+                      showUncleanedRecorderCol ? 'w-[16%]' : 'w-[20%]'
+                    }`}
+                  >
+                    ห้อง
+                  </th>
+                  <th
+                    className={`border border-[#CBD5E1] py-1 px-1 text-left ${
+                      showUncleanedRecorderCol ? 'w-[10%]' : 'w-[11%]'
+                    }`}
+                  >
+                    หมายเลขเครื่อง
+                  </th>
                   <th className="border border-[#CBD5E1] py-1 px-1 text-left w-[9%]">ประเภท</th>
-                  <th className="border border-[#CBD5E1] py-1 px-1 text-left w-[14%]">สาเหตุ</th>
-                  <th className="border border-[#CBD5E1] py-1 px-1 text-left w-[10%]">ผู้บันทึก</th>
-                  <th className="border border-[#CBD5E1] py-1 px-1 text-left w-[10%]">หมายเหตุ</th>
+                  <th
+                    className={`border border-[#CBD5E1] py-1 px-1 text-left ${
+                      showUncleanedRecorderCol ? 'w-[14%]' : 'w-[16%]'
+                    }`}
+                  >
+                    สาเหตุ
+                  </th>
+                  {showUncleanedRecorderCol && (
+                    <th className="border border-[#CBD5E1] py-1 px-1 text-left w-[10%]">ผู้บันทึก</th>
+                  )}
+                  <th
+                    className={`border border-[#CBD5E1] py-1 px-1 text-left ${
+                      showUncleanedRecorderCol ? 'w-[10%]' : 'w-[12%]'
+                    }`}
+                  >
+                    หมายเหตุ
+                  </th>
                 </tr>
               </thead>
               <tbody>
                 {monthlyUncleanedItems.length === 0 ? (
                   <tr>
-                    <td colSpan={9} className="border border-[#CBD5E1] py-8 text-center text-[#64748B]">
+                    <td
+                      colSpan={showUncleanedRecorderCol ? 9 : 8}
+                      className="border border-[#CBD5E1] py-8 text-center text-[#64748B]"
+                    >
                       ไม่พบรายการเครื่องที่ไม่ได้เข้าล้างตามประเภทที่เลือกในเดือนนี้
                     </td>
                   </tr>
@@ -1991,13 +2100,132 @@ export const ReportsPrintView: React.FC<ReportsPrintViewProps> = ({
                         <td className="border border-[#CBD5E1] py-[2.5px] px-1 break-words">
                           {CLEANING_STATUS_LABELS[item.status]}
                         </td>
-                        <td className="border border-[#CBD5E1] py-[2.5px] px-1 break-words">{techName}</td>
+                        {showUncleanedRecorderCol && (
+                          <td className="border border-[#CBD5E1] py-[2.5px] px-1 break-words">{techName}</td>
+                        )}
                         <td className="border border-[#CBD5E1] py-[2.5px] px-1 text-[#475569] break-words">
                           {cleanNote || '-'}
                         </td>
                       </tr>
                     );
                   })
+                )}
+              </tbody>
+            </table>
+
+                  {renderSignatures()}
+                </div>
+              </td>
+            </tr>
+            )}
+
+            {/* REPORT 4: UNRECORDED UNITS (NO LOG YET IN SELECTED PERIOD) */}
+            {activeReport === 'unrecorded_units' && (
+              <tr>
+                <td className="print-shell-cell">
+                  <div className="space-y-3.5">
+            {renderLetterhead(
+              `บัญชีรายการเครื่องปรับอากาศที่ยังไม่ได้บันทึกการล้าง (${cleaningTypeLabel})`,
+              `${
+                isCombinedMajor && majorCycle
+                  ? `ประจำรอบ ${majorCycle.label} ${selectedYear + 543} (รวม 2 เดือน)`
+                  : `ประจำเดือน ${formatThaiMonthYear(selectedYear, selectedMonth)} (${cleaningTypeLabel})`
+              } · ${
+                selectedBuilding === 'all' ? 'ทุกอาคาร' : formatReportBuildingName(selectedBuilding)
+              }`
+            )}
+
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs bg-[#F4F7FA] border border-[#CBD5E1] rounded-lg px-4 py-2 text-[#1E293B]">
+              <span>
+                เครื่องที่ยังไม่ได้บันทึกการล้าง:{' '}
+                <strong className="tabular-nums text-[#9D3E4E]">
+                  {unrecordedUnits.length.toLocaleString()} เครื่อง
+                </strong>{' '}
+                <span className="text-[#64748B] tabular-nums">
+                  (จากยอดใช้งานในสัญญา {unrecordedTotalScopeCount.toLocaleString()} เครื่อง)
+                </span>
+              </span>
+              <span className="tabular-nums text-[#334155]">
+                แอร์ปกติ:{' '}
+                <strong>
+                  {unrecordedUnits.filter((u) => u.acType === 'normal').length.toLocaleString()} เครื่อง
+                </strong>{' '}
+                · VRF / VRV:{' '}
+                <strong>
+                  {unrecordedUnits.filter((u) => u.acType === 'vrf').length.toLocaleString()} เครื่อง
+                </strong>
+              </span>
+            </div>
+
+            <table className="w-full table-fixed text-[9.5px] leading-[1.25] border border-[#CBD5E1] border-collapse">
+              <thead>
+                <tr className="bg-[#EEF4F9] text-[#1E293B]">
+                  <th className="border border-[#CBD5E1] py-1 px-1 text-center w-[6%]">ลำดับ</th>
+                  <th className="border border-[#CBD5E1] py-1 px-1 text-left w-[20%]">อาคาร / ชั้น</th>
+                  <th className="border border-[#CBD5E1] py-1 px-1 text-left w-[24%]">ห้อง</th>
+                  <th className="border border-[#CBD5E1] py-1 px-1 text-left w-[12%]">หมายเลขเครื่อง</th>
+                  <th className="border border-[#CBD5E1] py-1 px-1 text-left w-[10%]">ประเภท</th>
+                  <th className="border border-[#CBD5E1] py-1 px-1 text-left w-[15%]">รุ่น / BTU</th>
+                  <th className="border border-[#CBD5E1] py-1 px-1 text-left w-[13%]">หมายเหตุ</th>
+                </tr>
+              </thead>
+              <tbody>
+                {unrecordedGroups.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="border border-[#CBD5E1] py-8 text-center text-[#25593E] font-medium">
+                      บันทึกข้อมูลการล้างครบทุกเครื่องตามเงื่อนไขที่เลือกแล้ว
+                    </td>
+                  </tr>
+                ) : (
+                  unrecordedGroups.map((group) => (
+                    <React.Fragment key={group.buildingName}>
+                      <tr className="bg-[#EEF4F9] text-[#0F172A] break-after-avoid page-break-after-avoid">
+                        <td
+                          colSpan={7}
+                          className="border border-[#CBD5E1] py-1 px-2 font-semibold"
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <span>
+                              {group.buildingName} ยังไม่ได้บันทึกการล้าง {group.items.length} เครื่อง
+                              {group.totalInBuilding > 0
+                                ? ` (จากยอดรวมทั้งหมด ${group.totalInBuilding} เครื่อง)`
+                                : ''}
+                            </span>
+                            <span className="text-[9px] font-normal text-[#475569] tabular-nums">
+                              แอร์ปกติ {group.normalCount} เครื่อง · VRF / VRV {group.vrfCount} เครื่อง
+                            </span>
+                          </div>
+                        </td>
+                      </tr>
+                      {group.items.map(({ unit: u, rowNumber }) => {
+                        const spec = [u.model, u.btu ? `${u.btu} BTU` : ''].filter(Boolean).join(' · ');
+                        const cleanNote = formatReportNotes(u.notes);
+                        return (
+                          <tr key={u.id}>
+                            <td className="border border-[#CBD5E1] py-[2.5px] px-1 text-center tabular-nums">
+                              {rowNumber}
+                            </td>
+                            <td className="border border-[#CBD5E1] py-[2.5px] px-1 break-words">
+                              {formatReportBuildingName(u.building)} ({u.floor})
+                            </td>
+                            <td className="border border-[#CBD5E1] py-[2.5px] px-1 break-words">{u.room}</td>
+                            <td className="border border-[#CBD5E1] py-[2.5px] px-1 font-mono-tabular break-words">
+                              {u.unitCode}
+                            </td>
+                            <td className="border border-[#CBD5E1] py-[2.5px] px-1">
+                              {u.acType === 'vrf' ? 'VRF / VRV' : 'แอร์ปกติ'}
+                            </td>
+                            <td className="border border-[#CBD5E1] py-[2.5px] px-1 text-[#475569] break-words">
+                              {spec || '-'}
+                            </td>
+                            <td className="border border-[#CBD5E1] py-[2.5px] px-1 text-[#475569] break-words">
+                              {cleanNote || '-'}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </React.Fragment>
+                  ))
                 )}
               </tbody>
             </table>
